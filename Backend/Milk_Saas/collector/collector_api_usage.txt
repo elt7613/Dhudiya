@@ -1,0 +1,210 @@
+# Collector App API Usage Guide
+
+## Base URL
+All API endpoints are prefixed with: `/api/collector/`
+
+## Authentication
+- All requests require a JWT token in the Authorization header
+- Format: `Authorization: Bearer <your_jwt_token>`
+
+## 1. Customer APIs
+
+### List Customers
+GET /api/collector/customers/
+- Query Parameters:
+  - search: Filter by name or phone
+  - page: Page number for pagination
+- Response:
+{
+    "count": 100,
+    "next": "http://api/collector/customers/?page=2",
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "name": "John Doe",
+            "phone": "1234567890",
+            "is_active": true
+        }
+    ]
+}
+
+### Create Customer
+POST /api/collector/customers/
+- Request Body:
+{
+    "name": "John Doe",
+    "phone": "1234567890"
+}
+
+### Update Customer
+PUT/PATCH /api/collector/customers/{id}/
+- Request Body:
+{
+    "name": "John Doe Updated",
+    "phone": "0987654321"
+}
+
+### Delete Customer
+DELETE /api/collector/customers/{id}/
+
+## 2. Collection APIs
+
+### List Collections
+GET /api/collector/collections/
+- Query Parameters:
+  - date_from: Filter by start date (YYYY-MM-DD)
+  - date_to: Filter by end date (YYYY-MM-DD)
+  - collection_time: 'morning' or 'evening'
+  - milk_type: 'cow' or 'buffalo'
+  - customer: Customer ID
+  - measured: 'liters' or 'kg'
+  - min_rate/max_rate: Rate range
+  - min_amount/max_amount: Amount range
+  - search: Search by customer name
+  - ordering: Sort by field (e.g., -collection_date)
+- Response:
+{
+    "count": 100,
+    "next": "http://api/collector/collections/?page=2",
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "collection_time": "morning",
+            "milk_type": "cow",
+            "customer_name": "John Doe",
+            "collection_date": "2024-02-20",
+            "measured": "liters",
+            "liters": "10.50",
+            "kg": "10.80",
+            "fat_percentage": "3.5",
+            "fat_kg": "0.378",
+            "clr": "28.5",
+            "snf_percentage": "8.5",
+            "snf_kg": "0.918",
+            "rate": "45.00",
+            "amount": "486.00"
+        }
+    ]
+}
+
+### Create Collection
+POST /api/collector/collections/
+- Request Body:
+{
+    "collection_time": "morning",
+    "milk_type": "cow",
+    "customer": 1,
+    "collection_date": "2024-02-20",
+    "measured": "liters",
+    "liters": "10.50",
+    "kg": "10.80",
+    "fat_percentage": "3.5",
+    "fat_kg": "0.378",
+    "clr": "28.5",
+    "snf_percentage": "8.5",
+    "snf_kg": "0.918",
+    "rate": "45.00",
+    "amount": "486.00"
+}
+
+### Update Collection
+PUT/PATCH /api/collector/collections/{id}/
+
+### Delete Collection
+DELETE /api/collector/collections/{id}/
+
+## 3. Rate Chart APIs
+
+### List Rate Charts
+GET /api/collector/rate-charts/
+- Query Parameters:
+  - milk_type: 'cow' or 'buffalo'
+  - rate_type: 'rate per kg'
+  - min_rate/max_rate: Rate range
+  - min_fat/max_fat: Fat range
+  - ordering: Sort by field
+- Response:
+{
+    "count": 10,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "rate_type": "rate per kg",
+            "milk_type": "cow",
+            "fat_from": "3.0",
+            "fat_to": "4.0",
+            "rate": "45.00",
+            "is_active": true,
+            "created_at": "2024-02-20T10:00:00Z",
+            "updated_at": "2024-02-20T10:00:00Z"
+        }
+    ]
+}
+
+## 4. Market Milk Price APIs
+
+### List Market Prices
+GET /api/collector/market-milk-prices/
+- Query Parameters:
+  - price: Filter by exact price
+  - ordering: Sort by field (-created_at, price)
+- Response:
+{
+    "count": 10,
+    "results": [
+        {
+            "id": 1,
+            "price": "45.00",
+            "is_active": true,
+            "created_at": "2024-02-20T10:00:00Z",
+            "updated_at": "2024-02-20T10:00:00Z"
+        }
+    ]
+}
+
+### Create Market Price
+POST /api/collector/market-milk-prices/
+- Request Body:
+{
+    "price": "45.00"
+}
+
+## Common Features
+
+### Pagination
+- All list endpoints support pagination
+- Default page size: 10 items
+- Query parameters:
+  - page: Page number
+  - page_size: Items per page (optional)
+
+### Error Responses
+{
+    "detail": "Error message here"
+}
+or
+{
+    "field_name": [
+        "Error message for this field"
+    ]
+}
+
+### Success Responses
+- GET: 200 OK
+- POST: 200 OK
+- PUT/PATCH: 200 OK
+- DELETE: 200 OK with message
+
+### Soft Deletion
+- DELETE operations perform soft deletion
+- Records are marked as inactive but remain in database
+- Inactive records are excluded from regular GET requests
+
+### Authentication and Authorization
+- All endpoints require valid JWT token
+- Users can only access their own records
+- Token must be included in Authorization header

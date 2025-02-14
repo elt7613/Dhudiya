@@ -1,0 +1,166 @@
+# Collector App Documentation
+
+## Overview
+The Collector app is designed to manage milk collection operations, including customer management, milk collection records, rate charts, and market milk prices. It provides a RESTful API interface for these operations.
+
+## Models
+
+### 1. Customer
+- Represents milk suppliers
+- Fields:
+  - name: Customer's full name
+  - phone: Contact number (optional)
+  - author: Reference to User who created the record
+  - is_active: Boolean flag for soft deletion
+- Features:
+  - Soft deletion support
+  - Custom manager for active/all records
+
+### 2. Collection
+- Stores milk collection records
+- Fields:
+  - collection_time: Choice between 'morning'/'evening'
+  - milk_type: Choice between 'cow'/'buffalo'
+  - customer: ForeignKey to Customer
+  - collection_date: Date of collection
+  - measured: Choice between 'liters'/'kg'
+  - liters: Quantity in liters
+  - kg: Quantity in kilograms
+  - fat_percentage: Fat percentage
+  - fat_kg: Fat quantity in kg
+  - clr: CLR measurement
+  - snf_percentage: SNF percentage
+  - snf_kg: SNF quantity in kg
+  - fat_rate: Rate for fat
+  - snf_rate: Rate for SNF
+  - rate: Final rate per unit
+  - amount: Total amount
+  - timestamps: created_at, updated_at
+  - author: Reference to collecting User
+  - is_active: Soft deletion flag
+- Features:
+  - Ordered by collection_date and created_at (descending)
+  - Soft deletion support
+  - Custom manager for active/all records
+
+### 3. RateChart
+- Defines pricing structure for milk
+- Fields:
+  - rate_type: Currently supports 'rate per kg'
+  - milk_type: Choice between 'cow'/'buffalo'
+  - fat_from: Starting fat percentage
+  - fat_to: Ending fat percentage
+  - rate: Price for this range
+  - author: Reference to User who created the chart
+  - is_active: Soft deletion flag
+  - timestamps: created_at, updated_at
+
+### 4. MarketMilkPrice
+- Stores current market prices for milk
+- Fields:
+  - price: Current market price
+  - author: Reference to User who created the price
+  - is_active: Soft deletion flag
+  - timestamps: created_at, updated_at
+
+## Views (API Endpoints)
+
+### CustomerViewSet
+- Endpoints: /api/collector/customers/
+- Operations: CRUD operations for customers
+- Features:
+  - Search by name/phone
+  - Soft deletion
+  - Authentication required
+
+### CollectionViewSet
+- Endpoints: /api/collector/collections/
+- Operations: CRUD operations for milk collections
+- Features:
+  - Extensive filtering options
+  - Search by customer name
+  - Ordering by multiple fields
+  - Different serializers for list/detail views
+  - Soft deletion
+  - Authentication required
+
+### RateChartViewSet
+- Endpoints: /api/collector/rate-charts/
+- Operations: CRUD operations for rate charts
+- Features:
+  - Filtering by rate, fat range
+  - Ordering options
+  - Soft deletion
+  - Authentication required
+
+### MarketMilkPriceViewSet
+- Endpoints: /api/collector/market-milk-prices/
+- Operations: CRUD operations for market prices
+- Features:
+  - Filtering by price
+  - Ordering by price and creation date
+  - Soft deletion
+  - Authentication required
+
+## Serializers
+
+### CustomerSerializer
+- Handles customer data serialization
+- Auto-assigns author on creation
+
+### CollectionSerializer
+- Two variants:
+  - ListSerializer: Optimized for list view with customer name
+  - DetailSerializer: Full details including timestamps
+- Auto-assigns author on creation
+
+### RateChartSerializer
+- Handles rate chart data with fat ranges
+- Auto-assigns author on creation
+
+### MarketMilkPriceSerializer
+- Handles market price data
+- Auto-assigns author on creation
+
+## Filters
+
+### CollectionFilter
+- Supports filtering collections by:
+  - Date range (date_from, date_to)
+  - Rate range (min_rate, max_rate)
+  - Amount range (min_amount, max_amount)
+  - Collection time
+  - Milk type
+  - Customer
+  - Measurement type
+  - Various measurements (liters, kg, fat, SNF, etc.)
+
+### RateChartFilter
+- Supports filtering rate charts by:
+  - Rate range (min_rate, max_rate)
+  - Fat range (min_fat, max_fat)
+  - Milk type
+  - Rate type
+
+## Admin Interface
+
+The app provides Django admin interfaces for:
+- Customer management
+- Collection records
+- Rate charts with inline fat/SNF rates
+
+Features:
+- List filters
+- Search functionality
+- Custom queryset handling
+- Inline editing for rate charts
+
+## Authentication & Permissions
+- All API endpoints require authentication
+- Users can only access/modify their own records
+- Uses JWT authentication
+
+## Data Management
+- Implements soft deletion instead of hard deletion
+- Maintains audit trails (created_at, updated_at)
+- Uses select_related for optimized database queries 
