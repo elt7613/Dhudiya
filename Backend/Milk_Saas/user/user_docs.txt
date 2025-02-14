@@ -1,0 +1,125 @@
+# User App Documentation
+
+## Overview
+The User app is a custom authentication system built with Django, providing user management with phone number and username-based authentication, JWT tokens, and advanced security features including password reset functionality.
+
+## Models
+
+### User Model
+- Custom user model extending AbstractBaseUser and PermissionsMixin
+- Fields:
+  - username: Unique identifier
+  - phone_number: Unique phone number with regex validation
+  - email: Optional email field
+  - is_active: Boolean for account status
+  - is_staff: Boolean for admin access
+  - date_joined: Timestamp of registration
+  - reset_password_token: OTP for password reset
+  - reset_password_token_created_at: Timestamp for OTP expiry
+- Features:
+  - Soft deletion support
+  - Custom manager for active/all users
+  - Phone number validation
+  - Indexed fields for optimization
+  - Password reset functionality with OTP
+
+### CustomUserManager
+- Custom manager for User model
+- Features:
+  - create_user: Creates regular users
+  - create_superuser: Creates admin users
+  - Filters for active users only
+
+## Views
+
+### UserRegistrationView
+- Handles user registration
+- Features:
+  - Rate limiting (20 requests/minute)
+  - JWT token generation
+  - Error logging
+  - Validation checks
+
+### UserLoginView
+- Handles user authentication
+- Features:
+  - Dual authentication (username/phone)
+  - Failed login protection
+  - Rate limiting
+  - Cache-based attempt tracking
+  - JWT token generation
+
+### ForgotPasswordView
+- Handles password reset requests
+- Features:
+  - Email-based OTP delivery
+  - Rate limiting protection
+  - Error logging
+  - Validation checks
+
+### ResetPasswordView
+- Handles password reset with OTP
+- Features:
+  - OTP verification
+  - Password update
+  - Token cleanup
+  - Rate limiting protection
+
+## Security Features
+
+### Rate Limiting
+- Anonymous users: 20 requests/minute
+- Custom throttle classes
+- Cache-based tracking
+- Applied to all public endpoints
+
+### Login Protection
+- Maximum 5 failed attempts
+- 5-minute lockout period
+- Cache-based tracking
+- Auto-reset on successful login
+
+### Password Reset Security
+- 6-digit OTP generation
+- 10-minute OTP validity
+- Email-based delivery
+- Single-use tokens
+- Automatic token cleanup
+
+### JWT Authentication
+- Access token generation
+- 30-day token lifetime
+- Secure token handling
+
+## Error Handling
+- Custom exception handler
+- Detailed error logging
+- Development/Production error responses
+- Structured error messages
+
+## Admin Interface
+- Custom admin panel for User model
+- Features:
+  - List display with key fields
+  - Search functionality
+  - Filtering options
+  - Custom fieldsets
+  - Bulk actions
+
+## Data Management
+- Soft deletion support
+- Active/All records filtering
+- Database optimization
+- Indexed fields
+
+## Caching
+- Redis integration
+- Failed login attempt tracking
+- Rate limiting support
+- Configurable timeouts
+
+## Logging
+- Error logging
+- Warning tracking
+- Authentication monitoring
+- Structured log format 
