@@ -1,0 +1,206 @@
+# Collector App Test Documentation
+
+## Overview
+This document provides detailed documentation for the test cases in the Collector app. The tests are organized into three main classes:
+1. ModelTests - Testing model functionality
+2. APITests - Testing API endpoints and integration
+3. SerializerTests - Testing serializer behavior
+
+## Test Setup
+All test classes use Django's TestCase framework and include a comprehensive setUp method that creates:
+- A test user
+- A test customer
+- A test rate step
+- A test market price
+- A test collection record
+
+## 1. ModelTests
+Tests the basic functionality of all models in the collector app.
+
+### Setup
+- Creates test instances of User, Customer, RateStep, MarketMilkPrice, and Collection models
+- Sets up basic test data with realistic values
+
+### Test Methods
+
+#### test_customer_str
+- Purpose: Tests the string representation of Customer model
+- Verifies that str(customer) returns the customer's name
+- Expected output: "Test Customer"
+
+#### test_collection_str
+- Purpose: Tests the string representation of Collection model
+- Verifies that str(collection) returns "{customer} - {date} {time}"
+- Expected output: "Test Customer - {date} morning"
+
+#### test_rate_step_str
+- Purpose: Tests the string representation of RateStep model
+- Verifies that str(rate_step) returns "{milk_type} - {rate_type}"
+- Expected output: "cow - rate per kg"
+
+#### test_market_milk_price_str
+- Purpose: Tests the string representation of MarketMilkPrice model
+- Verifies that str(market_price) returns the price as string
+- Expected output: "45.00"
+
+#### test_soft_delete
+- Purpose: Tests soft deletion functionality for all models
+- Verifies that:
+  - Soft-deleted objects are not visible in normal queries
+  - Soft-deleted objects are still in database (accessible via all_objects)
+- Tests all four models: Customer, Collection, RateStep, and MarketMilkPrice
+
+## 2. APITests
+Tests the REST API endpoints and their functionality.
+
+### Setup
+- Creates test user and authenticates API client
+- Creates test instances of all models
+- Sets up test data with realistic values
+
+### Test Methods
+
+#### test_customer_list
+- Purpose: Tests GET /api/collector/customers/
+- Verifies:
+  - Response status is 200 OK
+  - Returns correct number of customers
+  - Proper pagination
+
+#### test_customer_create
+- Purpose: Tests POST /api/collector/customers/
+- Verifies:
+  - Can create new customer
+  - Response status is 201 CREATED
+  - Customer count increases
+
+#### test_collection_list
+- Purpose: Tests GET /api/collector/collections/
+- Verifies:
+  - Response status is 200 OK
+  - Returns correct number of collections
+  - Proper pagination
+
+#### test_collection_create
+- Purpose: Tests POST /api/collector/collections/
+- Verifies:
+  - Can create new collection
+  - Response status is 200 OK
+  - Collection count increases
+
+#### test_rate_step_list
+- Purpose: Tests GET /api/collector/rate-steps/
+- Verifies:
+  - Response status is 200 OK
+  - Returns correct number of rate steps
+  - Proper response format (dict or list)
+
+#### test_rate_step_create
+- Purpose: Tests POST /api/collector/rate-steps/
+- Verifies:
+  - Can create new rate step
+  - Response status is 201 CREATED
+  - RateStep count increases
+
+#### test_market_price_list
+- Purpose: Tests GET /api/collector/market-milk-prices/
+- Verifies:
+  - Response status is 200 OK
+  - Returns correct number of market prices
+  - Proper pagination
+
+#### test_market_price_create
+- Purpose: Tests POST /api/collector/market-milk-prices/
+- Verifies:
+  - Can create new market price
+  - Response status is 201 CREATED
+  - MarketMilkPrice count increases
+
+#### test_collection_filters
+- Purpose: Tests collection filtering functionality
+- Tests filters for:
+  - Date range (date_from, date_to)
+  - Milk type
+  - Customer ID
+- Verifies correct filtering behavior
+
+#### test_rate_step_filters
+- Purpose: Tests rate step filtering functionality
+- Tests filters for:
+  - Milk type
+  - Rate range (min_fat_rate, max_fat_rate)
+- Verifies correct filtering behavior
+
+#### test_authentication_required
+- Purpose: Tests authentication requirements
+- Verifies:
+  - Unauthenticated requests return 401
+  - Tests all main endpoints
+  - Proper error responses
+
+#### test_user_specific_data
+- Purpose: Tests data isolation between users
+- Verifies:
+  - Users can only see their own data
+  - Other users' data is not accessible
+  - Proper data filtering
+
+#### test_generate_invoice
+- Purpose: Tests invoice generation endpoint
+- Verifies:
+  - Can generate PDF invoice
+  - Correct content type
+  - Proper parameter handling
+  - Response status is 200 OK
+
+## 3. SerializerTests
+Tests the serializer functionality and validation.
+
+### Setup
+- Creates test user
+- Sets up test data for customer and collection
+
+### Test Methods
+
+#### test_customer_serializer
+- Purpose: Tests CustomerSerializer validation
+- Verifies:
+  - Can serialize customer data
+  - Proper validation of fields
+  - Required fields are enforced
+
+#### test_collection_serializer
+- Purpose: Tests CollectionDetailSerializer validation
+- Verifies:
+  - Can serialize collection data
+  - Proper validation of fields
+  - Required fields are enforced
+  - Customer relationship validation
+
+## Best Practices Demonstrated
+1. Comprehensive Setup: Each test class has thorough setUp method
+2. Isolation: Tests are independent and don't affect each other
+3. Coverage: Tests cover models, APIs, and serializers
+4. Authentication: Tests verify security requirements
+5. Data Integrity: Tests verify data isolation between users
+6. Error Handling: Tests verify proper error responses
+7. Filtering: Tests verify query parameter handling
+8. Soft Deletion: Tests verify proper handling of soft-deleted records
+
+## Running the Tests
+To run the tests:
+```bash
+python manage.py test collector
+```
+
+To run specific test class:
+```bash
+python manage.py test collector.tests.ModelTests
+python manage.py test collector.tests.APITests
+python manage.py test collector.tests.SerializerTests
+```
+
+To run specific test method:
+```bash
+python manage.py test collector.tests.APITests.test_generate_invoice
+``` 

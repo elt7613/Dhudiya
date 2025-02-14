@@ -1,7 +1,7 @@
 # Collector App Documentation
 
 ## Overview
-The Collector app is designed to manage milk collection operations, including customer management, milk collection records, rate charts, and market milk prices. It provides a RESTful API interface for these operations.
+The Collector app is designed to manage milk collection operations, including customer management, milk collection records, rate steps, and market milk prices. It provides a RESTful API interface for these operations and includes features for generating detailed reports.
 
 ## Models
 
@@ -32,7 +32,7 @@ The Collector app is designed to manage milk collection operations, including cu
   - snf_percentage: SNF percentage
   - snf_kg: SNF quantity in kg
   - fat_rate: Rate for fat
-  - snf_rate: Rate for SNF
+  - snf_rate: Rate for SNF 
   - rate: Final rate per unit
   - amount: Total amount
   - timestamps: created_at, updated_at
@@ -42,16 +42,20 @@ The Collector app is designed to manage milk collection operations, including cu
   - Ordered by collection_date and created_at (descending)
   - Soft deletion support
   - Custom manager for active/all records
+  - Report generation capabilities
 
-### 3. RateChart
-- Defines pricing structure for milk
+### 3. RateStep
+- Defines pricing structure for milk based on fat and SNF content
 - Fields:
   - rate_type: Currently supports 'rate per kg'
   - milk_type: Choice between 'cow'/'buffalo'
   - fat_from: Starting fat percentage
   - fat_to: Ending fat percentage
-  - rate: Price for this range
-  - author: Reference to User who created the chart
+  - fat_rate: Rate for fat range
+  - snf_from: Starting SNF percentage
+  - snf_to: Ending SNF percentage
+  - snf_rate: Rate for SNF range
+  - author: Reference to User who created the step
   - is_active: Soft deletion flag
   - timestamps: created_at, updated_at
 
@@ -72,6 +76,7 @@ The Collector app is designed to manage milk collection operations, including cu
   - Search by name/phone
   - Soft deletion
   - Authentication required
+  - User-specific data access
 
 ### CollectionViewSet
 - Endpoints: /api/collector/collections/
@@ -83,15 +88,22 @@ The Collector app is designed to manage milk collection operations, including cu
   - Different serializers for list/detail views
   - Soft deletion
   - Authentication required
+  - User-specific data access
+  - Report Generation:
+    - Purchase Report
+    - Milk Purchase Summary
+    - Customer Milk Bill
+  - PDF report generation with proper formatting and pagination
 
-### RateChartViewSet
-- Endpoints: /api/collector/rate-charts/
-- Operations: CRUD operations for rate charts
+### RateStepViewSet
+- Endpoints: /api/collector/rate-steps/
+- Operations: CRUD operations for rate steps
 - Features:
-  - Filtering by rate, fat range
+  - Filtering by rate, fat range, SNF range
   - Ordering options
   - Soft deletion
   - Authentication required
+  - User-specific data access
 
 ### MarketMilkPriceViewSet
 - Endpoints: /api/collector/market-milk-prices/
@@ -101,26 +113,31 @@ The Collector app is designed to manage milk collection operations, including cu
   - Ordering by price and creation date
   - Soft deletion
   - Authentication required
+  - User-specific data access
 
 ## Serializers
 
 ### CustomerSerializer
 - Handles customer data serialization
 - Auto-assigns author on creation
+- Validates user permissions
 
 ### CollectionSerializer
 - Two variants:
   - ListSerializer: Optimized for list view with customer name
   - DetailSerializer: Full details including timestamps
 - Auto-assigns author on creation
+- Handles complex calculations for fat and SNF
 
-### RateChartSerializer
-- Handles rate chart data with fat ranges
+### RateStepSerializer
+- Handles rate step data with fat and SNF ranges
 - Auto-assigns author on creation
+- Validates rate ranges
 
 ### MarketMilkPriceSerializer
 - Handles market price data
 - Auto-assigns author on creation
+- Validates price data
 
 ## Filters
 
@@ -135,32 +152,63 @@ The Collector app is designed to manage milk collection operations, including cu
   - Measurement type
   - Various measurements (liters, kg, fat, SNF, etc.)
 
-### RateChartFilter
-- Supports filtering rate charts by:
+### RateStepFilter
+- Supports filtering rate steps by:
   - Rate range (min_rate, max_rate)
   - Fat range (min_fat, max_fat)
+  - SNF range (min_snf, max_snf)
   - Milk type
   - Rate type
+
+## Report Generation
+
+### Purchase Report
+- Detailed daily collection summary
+- Includes:
+  - Date-wise totals
+  - Weight in kg
+  - Liters
+  - Fat percentage and kg
+  - SNF percentage and kg
+  - Amount in Rs.
+- Features:
+  - Proper pagination
+  - Grand totals
+  - Professional formatting
+  - User identification
+
+### Milk Purchase Summary
+- Summarized view of collections
+- Includes period totals and averages
+
+### Customer Milk Bill
+- Customer-specific collection details
+- Professional invoice format
+- Detailed calculations
 
 ## Admin Interface
 
 The app provides Django admin interfaces for:
 - Customer management
 - Collection records
-- Rate charts with inline fat/SNF rates
+- Rate steps
+- Market milk prices
 
 Features:
 - List filters
 - Search functionality
 - Custom queryset handling
-- Inline editing for rate charts
+- Soft deletion support
+- User-specific data access
 
 ## Authentication & Permissions
 - All API endpoints require authentication
 - Users can only access/modify their own records
 - Uses JWT authentication
+- Proper permission checks at all levels
 
 ## Data Management
 - Implements soft deletion instead of hard deletion
 - Maintains audit trails (created_at, updated_at)
-- Uses select_related for optimized database queries 
+- Uses select_related for optimized database queries
+- Proper data validation at model and serializer levels 

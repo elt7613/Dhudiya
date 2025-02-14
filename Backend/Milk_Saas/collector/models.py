@@ -25,8 +25,8 @@ class MarketMilkPrice(models.Model):
         self.is_active = False
         self.save()
     
-# User's Rate Chart
-class RateChart(models.Model):
+# User's Rate Step (formerly RateChart)
+class RateStep(models.Model):
     RATE_TYPE_CHOICES = [
         ('rate per kg', 'Rate per kg')
     ]
@@ -41,14 +41,17 @@ class RateChart(models.Model):
 
     fat_from = models.DecimalField(max_digits=4, decimal_places=2)
     fat_to = models.DecimalField(max_digits=4, decimal_places=2)
-    rate = models.DecimalField(max_digits=6, decimal_places=2)
+    fat_rate = models.DecimalField(max_digits=6, decimal_places=2)
+
+    snf_from = models.DecimalField(max_digits=4, decimal_places=2)
+    snf_to = models.DecimalField(max_digits=4, decimal_places=2)
+    snf_rate = models.DecimalField(max_digits=6, decimal_places=2)
 
     author = models.ForeignKey(User, on_delete=models.CASCADE)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Managers
     objects = ActiveManager()
     all_objects = models.Manager()
 
@@ -94,9 +97,9 @@ class Collection(models.Model):
     snf_percentage = models.DecimalField(max_digits=4, decimal_places=2)
     snf_kg = models.DecimalField(max_digits=6, decimal_places=2)
 
-    fat_rate = models.DecimalField(max_digits=100, decimal_places=2)
-    snf_rate = models.DecimalField(max_digits=100, decimal_places=2)
-    rate = models.DecimalField(max_digits=100, decimal_places=2)
+    fat_rate = models.DecimalField(max_digits=50, decimal_places=2, null=True, blank=True)
+    snf_rate = models.DecimalField(max_digits=50, decimal_places=2, null=True, blank=True)
+    rate = models.DecimalField(max_digits=50, decimal_places=2)
 
     amount = models.DecimalField(max_digits=100, decimal_places=2)
     

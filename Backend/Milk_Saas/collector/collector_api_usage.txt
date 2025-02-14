@@ -6,6 +6,7 @@ All API endpoints are prefixed with: `/api/collector/`
 ## Authentication
 - All requests require a JWT token in the Authorization header
 - Format: `Authorization: Bearer <your_jwt_token>`
+- All endpoints are user-specific (users can only access their own data)
 
 ## 1. Customer APIs
 
@@ -14,6 +15,7 @@ GET /api/collector/customers/
 - Query Parameters:
   - search: Filter by name or phone
   - page: Page number for pagination
+  - page_size: Number of items per page (optional)
 - Response:
 {
     "count": 100,
@@ -36,6 +38,7 @@ POST /api/collector/customers/
     "name": "John Doe",
     "phone": "1234567890"
 }
+- Response: Created customer object
 
 ### Update Customer
 PUT/PATCH /api/collector/customers/{id}/
@@ -44,9 +47,14 @@ PUT/PATCH /api/collector/customers/{id}/
     "name": "John Doe Updated",
     "phone": "0987654321"
 }
+- Response: Updated customer object
 
 ### Delete Customer
 DELETE /api/collector/customers/{id}/
+- Response:
+{
+    "message": "Customer deleted successfully"
+}
 
 ## 2. Collection APIs
 
@@ -63,6 +71,10 @@ GET /api/collector/collections/
   - min_amount/max_amount: Amount range
   - search: Search by customer name
   - ordering: Sort by field (e.g., -collection_date)
+  - min_fat/max_fat: Fat percentage range
+  - min_snf/max_snf: SNF percentage range
+  - page: Page number
+  - page_size: Items per page
 - Response:
 {
     "count": 100,
@@ -83,6 +95,8 @@ GET /api/collector/collections/
             "clr": "28.5",
             "snf_percentage": "8.5",
             "snf_kg": "0.918",
+            "fat_rate": "45.00",
+            "snf_rate": "45.00",
             "rate": "45.00",
             "amount": "486.00"
         }
@@ -105,26 +119,50 @@ POST /api/collector/collections/
     "clr": "28.5",
     "snf_percentage": "8.5",
     "snf_kg": "0.918",
+    "fat_rate": "45.00",
+    "snf_rate": "45.00",
     "rate": "45.00",
     "amount": "486.00"
 }
+- Response: Created collection object
 
 ### Update Collection
 PUT/PATCH /api/collector/collections/{id}/
+- Request Body: Same as create
+- Response: Updated collection object
 
 ### Delete Collection
 DELETE /api/collector/collections/{id}/
+- Response:
+{
+    "message": "Collection deleted successfully"
+}
 
-## 3. Rate Chart APIs
+### Generate Invoice
+GET /api/collector/collections/generate_invoice/
+- Query Parameters:
+  - customer: Customer ID (optional)
+  - date_from: Start date (YYYY-MM-DD)
+  - date_to: End date (YYYY-MM-DD)
+  - report_type: Type of report to generate
+    - "purchase_report": General purchase report
+    - "milk_purchase_summary": Summary report
+    - "customer_milk_bill": Customer-specific bill
+- Response: PDF file containing the requested report
 
-### List Rate Charts
-GET /api/collector/rate-charts/
+## 3. Rate Step APIs
+
+### List Rate Steps
+GET /api/collector/rate-steps/
 - Query Parameters:
   - milk_type: 'cow' or 'buffalo'
   - rate_type: 'rate per kg'
   - min_rate/max_rate: Rate range
   - min_fat/max_fat: Fat range
-  - ordering: Sort by field
+  - min_snf/max_snf: SNF range
+  - ordering: Sort by field (-created_at, rate, fat_from, fat_to)
+  - page: Page number
+  - page_size: Items per page
 - Response:
 {
     "count": 10,
@@ -137,12 +175,42 @@ GET /api/collector/rate-charts/
             "milk_type": "cow",
             "fat_from": "3.0",
             "fat_to": "4.0",
-            "rate": "45.00",
+            "fat_rate": "45.00",
+            "snf_from": "8.0",
+            "snf_to": "9.0",
+            "snf_rate": "45.00",
             "is_active": true,
             "created_at": "2024-02-20T10:00:00Z",
             "updated_at": "2024-02-20T10:00:00Z"
         }
     ]
+}
+
+### Create Rate Step
+POST /api/collector/rate-steps/
+- Request Body:
+{
+    "rate_type": "rate per kg",
+    "milk_type": "cow",
+    "fat_from": 3.0,
+    "fat_to": 4.0,
+    "fat_rate": 45.00,
+    "snf_from": 8.0,
+    "snf_to": 9.0,
+    "snf_rate": 45.00
+}
+- Response: Created rate step object
+
+### Update Rate Step
+PUT /api/collector/rate-steps/{id}/
+- Request Body: Same as create
+- Response: Updated rate step object
+
+### Delete Rate Step
+DELETE /api/collector/rate-steps/{id}/
+- Response:
+{
+    "message": "Rate step deleted successfully"
 }
 
 ## 4. Market Milk Price APIs
@@ -152,6 +220,8 @@ GET /api/collector/market-milk-prices/
 - Query Parameters:
   - price: Filter by exact price
   - ordering: Sort by field (-created_at, price)
+  - page: Page number
+  - page_size: Items per page
 - Response:
 {
     "count": 10,
@@ -171,6 +241,19 @@ POST /api/collector/market-milk-prices/
 - Request Body:
 {
     "price": "45.00"
+}
+- Response: Created market price object
+
+### Update Market Price
+PUT /api/collector/market-milk-prices/{id}/
+- Request Body: Same as create
+- Response: Updated market price object
+
+### Delete Market Price
+DELETE /api/collector/market-milk-prices/{id}/
+- Response:
+{
+    "message": "Market milk price deleted successfully"
 }
 
 ## Common Features
@@ -194,17 +277,27 @@ or
 }
 
 ### Success Responses
-- GET: 200 OK
-- POST: 200 OK
-- PUT/PATCH: 200 OK
-- DELETE: 200 OK with message
+- GET: 200 OK with data
+- POST: 200 OK with created object
+- PUT/PATCH: 200 OK with updated object
+- DELETE: 200 OK with success message
 
 ### Soft Deletion
 - DELETE operations perform soft deletion
 - Records are marked as inactive but remain in database
 - Inactive records are excluded from regular GET requests
+- Can be restored through admin interface
 
 ### Authentication and Authorization
 - All endpoints require valid JWT token
 - Users can only access their own records
 - Token must be included in Authorization header
+- Invalid/expired tokens return 401 Unauthorized
+- Insufficient permissions return 403 Forbidden
+
+### Data Validation
+- All endpoints perform proper data validation
+- Invalid data returns 400 Bad Request with error details
+- Required fields must be provided
+- Field types and formats are validated
+- Business logic rules are enforced

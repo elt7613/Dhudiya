@@ -1,7 +1,7 @@
 # Using Python requests
 import requests
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMDQwMzkxLCJpYXQiOjE3Mzk0NDgzOTEsImp0aSI6IjhkYzFjZDExYzRhNzQ4OTU5MGM3ZmViMjVlZTgxM2NlIiwidXNlcl9pZCI6Mn0.BoL5VCVm903Jq8GYLgz9D8PDOfBZlRtLsRbcVHmZ_z0"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
@@ -10,33 +10,31 @@ headers={
     'Content-Type': 'application/json'
 }
 
-def get_rate_charts():
-# Get all rate charts
+def get_rate_steps():
     response = requests.get(
-        f'{BASE_URL}/rate-charts/',
+        f'{BASE_URL}/rate-steps/',
         headers=headers
     )
     print(response.json())
 
-# Get specific rate chart by ID
-def get_rate_chart(rate_chart_id):
+def get_rate_step(rate_step_id):
     response = requests.get(
-        f'{BASE_URL}/rate-charts/{rate_chart_id}/',
+        f'{BASE_URL}/rate-steps/{rate_step_id}/',
         headers=headers
     )
     print(response.json())
 
-def create_rate_chart():
+def create_rate_step():
     data = {
-    "rate_type": "rate per kg",
-    "milk_type": "buffalo",
-    "fat_from": 4.0,
-    "fat_to": 4.5,
-    "rate": 50.00
+        "rate_type": "rate per kg",
+        "milk_type": "cow",
+        "fat_from": 4.0,
+        "fat_to": 4.5,
+        "rate": 50.00
     }
 
     response = requests.post(
-        f'{BASE_URL}/rate-charts/',
+        f'{BASE_URL}/rate-steps/',
         headers=headers,
         json=data
     )
@@ -44,7 +42,7 @@ def create_rate_chart():
     print(response.json())
     
 
-def update_rate_chart(rate_chart_id):
+def update_rate_step(rate_step_id):
     data = {
         "rate_type": "rate per kg",
         "milk_type": "cow",
@@ -54,15 +52,15 @@ def update_rate_chart(rate_chart_id):
     }
 
     response = requests.put(
-        f'{BASE_URL}/rate-charts/{rate_chart_id}/',
+        f'{BASE_URL}/rate-steps/{rate_step_id}/',
         headers=headers,
         json=data
     )
     print(response.json())      
 
-def delete_rate_chart(rate_chart_id):
+def delete_rate_step(rate_step_id):
     response = requests.delete(
-        f'{BASE_URL}/rate-charts/{rate_chart_id}/',
+        f'{BASE_URL}/rate-steps/{rate_step_id}/',
         headers=headers
     )
     print(response.status_code)
@@ -70,4 +68,4 @@ def delete_rate_chart(rate_chart_id):
 
 
 if __name__ == "__main__":
-    delete_rate_chart(3)
+    create_rate_step() 

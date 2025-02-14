@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Collection, Customer, RateChart, MarketMilkPrice
+from .models import Collection, Customer, RateStep, MarketMilkPrice
 
 
 class MarketMilkPriceSerializer(serializers.ModelSerializer):
@@ -31,7 +31,7 @@ class CollectionListSerializer(serializers.ModelSerializer):
             'id', 'collection_time', 'milk_type', 'customer_name',
             'collection_date', 'measured', 'liters', 'kg',
             'fat_percentage', 'fat_kg', 'clr', 'snf_percentage', 'snf_kg',
-            'rate', 'amount'
+            'fat_rate', 'snf_rate', 'rate', 'amount'
         ]
 
 class CollectionDetailSerializer(serializers.ModelSerializer):
@@ -43,21 +43,34 @@ class CollectionDetailSerializer(serializers.ModelSerializer):
             'id', 'collection_time', 'milk_type', 'customer',
             'customer_name', 'collection_date', 'measured', 'liters', 'kg',
             'fat_percentage', 'fat_kg', 'clr', 'snf_percentage', 'snf_kg',
-            'rate', 'amount',
+            'fat_rate', 'snf_rate', 'rate', 'amount',
             'created_at', 'updated_at', 'is_active'
         ]
         read_only_fields = ['is_active', 'created_at', 'updated_at']
+
+    def validate_customer(self, value):
+        request = self.context.get('request')
+        if not request:
+            raise serializers.ValidationError("No request found in context")
+        
+        # Check if the customer exists and belongs to the current user
+        if not Customer.objects.filter(id=value.id, author=request.user).exists():
+            raise serializers.ValidationError(
+                "Invalid customer. Please select a customer that belongs to your account."
+            )
+        return value
 
     def create(self, validated_data):
         validated_data['author'] = self.context['request'].user
         return super().create(validated_data)
 
-class RateChartSerializer(serializers.ModelSerializer):
+class RateStepSerializer(serializers.ModelSerializer):
     class Meta:
-        model = RateChart
+        model = RateStep
         fields = [
             'id', 'rate_type', 'milk_type', 
-            'fat_from', 'fat_to', 'rate',
+            'fat_from', 'fat_to', 'fat_rate',
+            'snf_from', 'snf_to', 'snf_rate',
             'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['is_active', 'created_at', 'updated_at']
