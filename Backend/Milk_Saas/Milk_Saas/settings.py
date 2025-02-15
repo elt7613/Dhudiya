@@ -20,6 +20,7 @@ INSTALLED_APPS = [
 
     'user',
     'collector',
+    'wallet',
     
     'rest_framework',
     'django_filters',
@@ -248,3 +249,11 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = "elusifataehyunge@gmail.com"
 EMAIL_HOST_PASSWORD = "itlt yvkd ijgh yhbm" 
+
+# Razorpay Settings
+RAZORPAY_KEY_ID = 'rzp_test_ZjwOOezkHZ5DsV'
+RAZORPAY_KEY_SECRET = 'j9qSfEl8QLJGpL0rUsGDHGFH'
+RAZORPAY_WEBHOOK_SECRET = 'your_webhook_secret'
+
+# Frontend URL for payment callbacks
+FRONTEND_URL = 'http://localhost:3000'  # Change this according to your React Native app's deep linking scheme

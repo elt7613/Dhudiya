@@ -2,7 +2,7 @@ import requests
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMDQwMzkxLCJpYXQiOjE3Mzk0NDgzOTEsImp0aSI6IjhkYzFjZDExYzRhNzQ4OTU5MGM3ZmViMjVlZTgxM2NlIiwidXNlcl9pZCI6Mn0.BoL5VCVm903Jq8GYLgz9D8PDOfBZlRtLsRbcVHmZ_z0"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
 
 headers = {
     "Authorization": f"Bearer {token}"
@@ -38,4 +38,4 @@ def delete_market_milk_price(price_id):
 
 
 if __name__ == "__main__":
-    delete_market_milk_price(2)
+    create_market_milk_price()

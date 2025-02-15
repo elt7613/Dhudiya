@@ -3,7 +3,7 @@ from datetime import date
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMDQwMzkxLCJpYXQiOjE3Mzk0NDgzOTEsImp0aSI6IjhkYzFjZDExYzRhNzQ4OTU5MGM3ZmViMjVlZTgxM2NlIiwidXNlcl9pZCI6Mn0.BoL5VCVm903Jq8GYLgz9D8PDOfBZlRtLsRbcVHmZ_z0"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
 
 headers = {
     "Authorization": f"Bearer {token}"
@@ -15,7 +15,7 @@ def create_collection(customer_id):
             "collection_time": "morning",
             "milk_type": "buffalo",
             "customer": customer_id,
-            "collection_date": str(date.today()),
+            "collection_date": '2025-02-21',
             "measured": "liters",
             "liters": "10.5",
             "kg": "10.5",
@@ -73,6 +73,6 @@ def delete_collection(collection_id):
     print(response.json())
 
 if __name__ == "__main__":
-    create_collection(1)
+    create_collection(8)
 
 

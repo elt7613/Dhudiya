@@ -1,14 +1,14 @@
 from django_filters import rest_framework as filters
-from .models import Collection, RateChart
+from .models import Collection, RateStep
 
-class RateChartFilter(filters.FilterSet):
+class RateStepFilter(filters.FilterSet):
     min_rate = filters.NumberFilter(field_name='rate', lookup_expr='gte')
     max_rate = filters.NumberFilter(field_name='rate', lookup_expr='lte')
     min_fat = filters.NumberFilter(field_name='fat_from', lookup_expr='gte')
     max_fat = filters.NumberFilter(field_name='fat_to', lookup_expr='lte')
 
     class Meta:
-        model = RateChart
+        model = RateStep
         fields = {
             'milk_type': ['exact'],
             'rate_type': ['exact'],

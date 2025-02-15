@@ -1,28 +1,23 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('username', 'phone_number', 'email', 'is_staff', 'is_active', 'date_joined')
-    list_filter = ('is_active', 'is_staff', 'is_superuser', 'groups')
-    search_fields = ('username', 'phone_number', 'email')
-    ordering = ('-date_joined',)
-    list_per_page = 20
-    
+    list_display = ('username', 'email', 'phone_number', 'is_staff', 'is_active')
+    list_filter = ('is_staff', 'is_active')
     fieldsets = (
-        (None, {'fields': ('username', 'phone_number', 'email', 'password')}),
+        (None, {'fields': ('username', 'password')}),
+        ('Personal info', {'fields': ('email', 'phone_number')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
-        ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
-    
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'phone_number', 'email', 'password1', 'password2'),
+            'fields': ('username', 'email', 'phone_number', 'password1', 'password2'),
         }),
     )
-
-    def get_queryset(self, request):
-        # Show all users including inactive ones
-        return User.objects.all()
+    search_fields = ('username', 'email', 'phone_number')
+    ordering = ('username',)
