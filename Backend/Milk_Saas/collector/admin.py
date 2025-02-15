@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Customer, Collection, RateStep, MarketMilkPrice
+from .models import Customer, Collection, RateStep, MarketMilkPrice, DairyInformation
 
 
 @admin.register(MarketMilkPrice)
@@ -46,3 +46,18 @@ class RateStepAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return RateStep.all_objects.all()
+
+@admin.register(DairyInformation)
+class DairyInformationAdmin(admin.ModelAdmin):
+    list_display = ('dairy_name', 'dairy_address', 'rate_type', 'author', 'is_active', 'created_at')
+    list_filter = ('rate_type', 'is_active')
+    search_fields = ('dairy_name',)
+    ordering = ('-created_at',)
+
+    def get_queryset(self, request):
+        return DairyInformation.all_objects.filter(author=request.user)
+
+    def save_model(self, request, obj, form, change):
+        if not change:  # If creating new object
+            obj.author = request.user
+        super().save_model(request, obj, form, change)

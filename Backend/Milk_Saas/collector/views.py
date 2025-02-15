@@ -13,13 +13,14 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from io import BytesIO
 from datetime import datetime, timedelta
-from .models import Collection, Customer, RateStep, MarketMilkPrice
+from .models import Collection, Customer, RateStep, MarketMilkPrice, DairyInformation
 from .serializers import (
     CollectionListSerializer, 
     CollectionDetailSerializer,
     CustomerSerializer,
     RateStepSerializer,
-    MarketMilkPriceSerializer
+    MarketMilkPriceSerializer,
+    DairyInformationSerializer
 )
 from .filters import CollectionFilter, RateStepFilter
 
@@ -37,6 +38,22 @@ class MarketMilkPriceViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         instance.soft_delete()
         return Response({'message': 'Market milk price deleted successfully'}, status=status.HTTP_200_OK)
+    
+class DairyInformationViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DairyInformationSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['dairy_name']
+    ordering_fields = ['dairy_name', 'rate_type', 'created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        return DairyInformation.objects.filter(author=self.request.user)
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()
+        return Response({'message': 'Dairy information deleted successfully'}, status=status.HTTP_200_OK)
+
 
 class CustomerViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -107,13 +124,15 @@ class CollectionViewSet(viewsets.ModelViewSet):
         """Generate the purchase report section with pagination support"""
         elements = []
         
-        # Add user's name at top left
-        user_name = collections.first().author.username if collections.exists() else self.request.user.username
-        elements.append(Paragraph(user_name, styles['UserName']))
+        # Get dairy information for the user
+        dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
+        # Add dairy name at top center with underline
+        dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
+        elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
         elements.append(Spacer(1, 5))
         
         # Add title (centered and underlined)
-        elements.append(Paragraph('<u>PURCHASE REPORT</u>', styles['ReportTitle']))
+        elements.append(Paragraph('PURCHASE REPORT', styles['ReportTitle']))
         
         # Get date range
         start_date = collections.aggregate(min_date=Min('collection_date'))['min_date']
@@ -259,9 +278,10 @@ class CollectionViewSet(viewsets.ModelViewSet):
             if page_num < total_pages - 1:
                 elements.append(PageBreak())
                 # Repeat the header information on new pages
-                elements.append(Paragraph(user_name, styles['UserName']))
+                elements.append(PageBreak())
+                elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
                 elements.append(Spacer(1, 5))
-                elements.append(Paragraph('<u>PURCHASE REPORT</u>', styles['ReportTitle']))
+                elements.append(Paragraph('PURCHASE REPORT', styles['ReportTitle']))
                 elements.append(Paragraph(
                     f"Dated from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
                     styles['DateRange']
@@ -278,6 +298,13 @@ class CollectionViewSet(viewsets.ModelViewSet):
         
         # Force start on new page
         elements.append(PageBreak())
+        
+        # Get dairy information for the user
+        dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
+        # Add dairy name at top center with underline
+        dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
+        elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
+        elements.append(Spacer(1, 5))
         
         # Add title (centered)
         elements.append(Paragraph('MILK PURCHASE SUMMARY', styles['ReportTitle']))
@@ -372,6 +399,8 @@ class CollectionViewSet(viewsets.ModelViewSet):
             if page_num > 0:
                 # Repeat header for new pages
                 elements.append(PageBreak())
+                elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
+                elements.append(Spacer(1, 5))
                 elements.append(Paragraph('MILK PURCHASE SUMMARY', styles['ReportTitle']))
                 elements.append(Paragraph(
                     f"Dated from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
@@ -464,6 +493,13 @@ class CollectionViewSet(viewsets.ModelViewSet):
         
         # Force start on new page
         elements.append(PageBreak())
+        
+        # Get dairy information for the user
+        dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
+        # Add dairy name at top center with underline
+        dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
+        elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
+        elements.append(Spacer(1, 5))
         
         # Add Milk Bill title
         elements.append(Paragraph("Milk Bill", styles['ReportTitle']))
@@ -616,8 +652,8 @@ class CollectionViewSet(viewsets.ModelViewSet):
         return elements
 
     @action(detail=False, methods=['get'])
-    def generate_invoice(self, request):
-        """Generate a comprehensive invoice PDF containing all three report types"""
+    def generate_report(self, request):
+        """Generate a comprehensive report PDF containing all three report types"""
         # Get date range from query parameters
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
@@ -665,6 +701,14 @@ class CollectionViewSet(viewsets.ModelViewSet):
         styles = getSampleStyleSheet()
         
         # Add custom styles that will be used across reports
+        styles.add(ParagraphStyle(
+            name='DairyName',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=5,
+            alignment=1  # Center alignment
+        ))
+
         styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=styles['Heading1'],
@@ -725,7 +769,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
         elements = []
         
         # Add title and date range
-        title = Paragraph(f"Milk Collection Invoice ({start_date} to {end_date})", styles['CustomTitle'])
+        title = Paragraph(f"Milk Collection Report ({start_date} to {end_date})", styles['CustomTitle'])
         elements.append(title)
         
         # Add purchase report
@@ -747,7 +791,143 @@ class CollectionViewSet(viewsets.ModelViewSet):
         # Prepare response
         buffer.seek(0)
         response = HttpResponse(buffer.read(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="milk_invoice_{start_date}_to_{end_date}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="milk_report_{start_date}_to_{end_date}.pdf"'
+        
+        return response
+
+    @action(detail=False, methods=['get'])
+    def generate_customer_bill(self, request):
+        """Generate milk bill PDF for specific customers"""
+        # Get date range and customer IDs from query parameters
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        customer_ids = request.query_params.get('customer_ids')
+        
+        if not all([start_date, end_date, customer_ids]):
+            return Response(
+                {'error': 'start_date, end_date, and customer_ids are required query parameters'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            customer_ids = [int(id.strip()) for id in customer_ids.split(',')]
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format (use YYYY-MM-DD) or customer IDs format'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # First, check if all customers belong to the user
+        user_customer_ids = set(Customer.objects.filter(
+            author=request.user,
+            id__in=customer_ids
+        ).values_list('id', flat=True))
+        
+        invalid_customer_ids = set(customer_ids) - user_customer_ids
+        if invalid_customer_ids:
+            return Response(
+                {
+                    'error': 'Cannot generate report for customers that do not belong to you',
+                    'invalid_customer_ids': list(invalid_customer_ids)
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Get collections for the date range and specified customers
+        collections = Collection.objects.filter(
+            author=request.user,
+            collection_date__gte=start_date,
+            collection_date__lte=end_date,
+            customer_id__in=customer_ids
+        ).select_related('customer')
+        
+        if not collections.exists():
+            return Response(
+                {'error': 'No collections found for the specified customers and date range'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(letter),
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=30,
+            bottomMargin=30
+        )
+        
+        # Get styles and define common styles
+        styles = getSampleStyleSheet()
+        
+        # Add custom styles
+        styles.add(ParagraphStyle(
+            name='DairyName',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=5,
+            alignment=1  # Center alignment
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='ReportTitle',
+            parent=styles['Heading1'],
+            fontSize=14,
+            spaceAfter=10,
+            alignment=1  # Center alignment
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='DateRange',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=8,
+            alignment=0  # Left alignment
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='PartyName',
+            parent=styles['Normal'],
+            fontSize=12,
+            fontName='Helvetica-Bold',
+            spaceAfter=2,
+            alignment=0  # Left alignment
+        ))
+        
+        styles.add(ParagraphStyle(
+            name='PageNumber',
+            parent=styles['Normal'],
+            fontSize=9,
+            alignment=1  # Center alignment
+        ))
+        
+        # Generate elements
+        elements = []
+        
+        # Get customers in the specified list
+        customers = Customer.objects.filter(
+            id__in=customer_ids,
+            author=request.user
+        )
+        
+        # Generate milk bill for each customer
+        for customer in customers:
+            customer_collections = collections.filter(customer=customer)
+            if customer_collections.exists():
+                elements.extend(self._generate_customer_milk_bill_v2(
+                    customer_collections, customer, doc, styles
+                ))
+        
+        # Build PDF
+        doc.build(elements)
+        
+        # Prepare response
+        buffer.seek(0)
+        response = HttpResponse(buffer.read(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="milk_bills_{start_date}_to_{end_date}.pdf"'
         
         return response
 
@@ -773,3 +953,4 @@ class RateStepViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         self.perform_destroy(instance)
         return Response({'message': 'Rate step deleted successfully'}, status=status.HTTP_200_OK)
+

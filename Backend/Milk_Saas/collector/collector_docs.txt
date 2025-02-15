@@ -67,6 +67,20 @@ The Collector app is designed to manage milk collection operations, including cu
   - is_active: Soft deletion flag
   - timestamps: created_at, updated_at
 
+### DairyInformation
+- Represents dairy business information
+- Fields:
+  - dairy_name: Name of the dairy
+  - dairy_address: Address (optional)
+  - rate_type: Choice between 'fat_only', 'fat_snf', 'fat_clr'
+  - author: Reference to User
+  - is_active: Soft deletion flag
+  - timestamps: created_at, updated_at
+- Features:
+  - Soft deletion support
+  - Custom manager for active/all records
+  - Used in report generation for branding
+
 ## Views (API Endpoints)
 
 ### CustomerViewSet
@@ -93,7 +107,9 @@ The Collector app is designed to manage milk collection operations, including cu
     - Purchase Report
     - Milk Purchase Summary
     - Customer Milk Bill
+    - Individual Customer Bills
   - PDF report generation with proper formatting and pagination
+  - Customer-specific bill generation with ownership validation
 
 ### RateStepViewSet
 - Endpoints: /api/collector/rate-steps/
@@ -114,6 +130,17 @@ The Collector app is designed to manage milk collection operations, including cu
   - Soft deletion
   - Authentication required
   - User-specific data access
+
+### DairyInformationViewSet
+- Endpoints: /api/collector/dairy-information/
+- Operations: CRUD operations for dairy information
+- Features:
+  - Search by dairy name
+  - Ordering by dairy name, rate type, and creation date
+  - Soft deletion
+  - Authentication required
+  - User-specific data access
+  - Used in report generation for dairy name display
 
 ## Serializers
 
@@ -176,15 +203,48 @@ The Collector app is designed to manage milk collection operations, including cu
   - Grand totals
   - Professional formatting
   - User identification
+  - Dairy name display
+  - Page numbering
+  - Automatic header repetition on new pages
 
 ### Milk Purchase Summary
-- Summarized view of collections
-- Includes period totals and averages
+- Summarized view of collections by customer
+- Includes:
+  - Customer details (ID, name, phone)
+  - Total weight and liters
+  - Average fat and SNF percentages
+  - Total fat and SNF kg
+  - Total amount
+- Features:
+  - Customer count
+  - Grand totals
+  - Professional formatting
+  - Pagination support
+  - Dairy name display
 
 ### Customer Milk Bill
 - Customer-specific collection details
-- Professional invoice format
-- Detailed calculations
+- Features:
+  - Individual customer bills
+  - Daily collection breakdown
+  - Detailed measurements (weight, liters, fat, SNF, CLR)
+  - Rate calculations
+  - Total amount calculations
+  - Professional formatting
+  - Dairy name display
+  - Date range display
+  - Automatic font size adjustment for large datasets
+
+### Individual Customer Bill Generation
+- Generate bills for specific customers
+- Features:
+  - Customer ownership validation
+  - Multiple customer selection
+  - Date range filtering
+  - Professional PDF formatting
+  - Error handling for invalid customers
+  - Separate bills for each customer
+  - Dairy name display on each bill
 
 ## Admin Interface
 
@@ -206,6 +266,36 @@ Features:
 - Users can only access/modify their own records
 - Uses JWT authentication
 - Proper permission checks at all levels
+
+## Data Management
+- Implements soft deletion instead of hard deletion
+- Maintains audit trails (created_at, updated_at)
+- Uses select_related for optimized database queries
+- Proper data validation at model and serializer levels
+
+## Security Features
+- All endpoints require authentication
+- User-specific data access
+- Customer ownership validation
+- Soft deletion instead of hard deletion
+- Error handling for invalid requests
+- Proper permission checks
+
+## Report Generation Security
+- Validates customer ownership before generating reports
+- Prevents access to other users' customer data
+- Validates date ranges
+- Handles invalid customer IDs gracefully
+- Returns appropriate error messages for invalid requests
+
+## Best Practices
+- Implements soft deletion
+- Uses select_related for optimized queries
+- Proper error handling
+- Professional PDF formatting
+- Secure data access
+- Efficient pagination
+- Proper data validation
 
 ## Data Management
 - Implements soft deletion instead of hard deletion

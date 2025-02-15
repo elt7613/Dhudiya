@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 User = get_user_model()
 
@@ -140,3 +141,33 @@ class Customer(models.Model):
     def soft_delete(self):
         self.is_active = False
         self.save()
+
+class DairyInformation(models.Model):
+    RATE_TYPE_CHOICES = [
+        ('fat_only', 'Fat Only'),
+        ('fat_snf', 'Fat + SNF'),
+        ('fat_clr', 'Fat + CLR')
+    ]
+
+    dairy_name = models.CharField(max_length=255)
+    dairy_address = models.TextField(blank=True)
+    rate_type = models.CharField(max_length=20,choices=RATE_TYPE_CHOICES)
+    author = models.ForeignKey(User, on_delete=models.CASCADE)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ActiveManager()
+    all_objects = models.Manager()
+
+    def __str__(self):
+        return f"{self.dairy_name} - {self.get_rate_type_display()}"
+
+    def soft_delete(self):
+        self.is_active = False
+        self.save()
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Dairy Information'
+        verbose_name_plural = 'Dairy Information'

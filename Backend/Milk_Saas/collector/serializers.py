@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Collection, Customer, RateStep, MarketMilkPrice
+from .models import Collection, Customer, RateStep, MarketMilkPrice, DairyInformation
 
 
 class MarketMilkPriceSerializer(serializers.ModelSerializer):
@@ -74,6 +74,16 @@ class RateStepSerializer(serializers.ModelSerializer):
             'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['is_active', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        validated_data['author'] = self.context['request'].user
+        return super().create(validated_data)
+
+class DairyInformationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DairyInformation
+        fields = ['id', 'dairy_name', 'dairy_address', 'rate_type', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'is_active', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         validated_data['author'] = self.context['request'].user

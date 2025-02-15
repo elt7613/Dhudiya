@@ -11,7 +11,7 @@ headers = {
 
 def generate_invoice(start_date, end_date):
     response = requests.get(
-        f'{BASE_URL}/collections/generate_invoice/',
+        f'{BASE_URL}/collections/generate_report/',
         params={'start_date': start_date, 'end_date': end_date},
         headers=headers
     )

@@ -7,13 +7,14 @@ from decimal import Decimal
 from datetime import date, datetime, timedelta
 from rest_framework.test import APIRequestFactory
 from django.db.models import Q
-from .models import Customer, Collection, RateStep, MarketMilkPrice
+from .models import Customer, Collection, RateStep, MarketMilkPrice, DairyInformation
 from .serializers import (
     CustomerSerializer,
     CollectionListSerializer,
     CollectionDetailSerializer,
     RateStepSerializer,
-    MarketMilkPriceSerializer
+    MarketMilkPriceSerializer,
+    DairyInformationSerializer
 )
 
 User = get_user_model()
@@ -24,6 +25,14 @@ class ModelTests(TestCase):
             username='testuser',
             password='testpass123',
             phone_number='9876543210'
+        )
+        
+        # Create test dairy information
+        self.dairy_info = DairyInformation.objects.create(
+            dairy_name='Test Dairy',
+            dairy_address='123 Test Street',
+            rate_type='fat_snf',
+            author=self.user
         )
         
         # Create test customer
@@ -72,6 +81,14 @@ class ModelTests(TestCase):
             amount=Decimal('486.00'),
             author=self.user
         )
+
+    def test_dairy_information_str(self):
+        self.assertEqual(str(self.dairy_info), 'Test Dairy - Fat + SNF')
+
+    def test_dairy_information_soft_delete(self):
+        self.dairy_info.soft_delete()
+        self.assertFalse(DairyInformation.objects.filter(id=self.dairy_info.id).exists())
+        self.assertTrue(DairyInformation.all_objects.filter(id=self.dairy_info.id).exists())
 
     def test_customer_str(self):
         self.assertEqual(str(self.customer), 'Test Customer')
@@ -155,6 +172,14 @@ class APITests(APITestCase):
             snf_rate=Decimal('45.00'),
             rate=Decimal('45.00'),
             amount=Decimal('486.00'),
+            author=self.user
+        )
+
+        # Create test dairy information
+        self.dairy_info = DairyInformation.objects.create(
+            dairy_name='Test Dairy',
+            dairy_address='123 Test Street',
+            rate_type='fat_snf',
             author=self.user
         )
 
@@ -331,7 +356,7 @@ class APITests(APITestCase):
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['name'], 'Test Customer')
 
-    def test_generate_invoice(self):
+    def test_generate_report(self):
         # First ensure we have some collection data
         Collection.objects.create(
             collection_time='morning',
@@ -353,7 +378,7 @@ class APITests(APITestCase):
             author=self.user
         )
 
-        url = reverse('collection-generate-invoice')
+        url = reverse('collection-generate-report')
         params = {
             'start_date': date.today().isoformat(),
             'end_date': date.today().isoformat(),
@@ -368,6 +393,103 @@ class APITests(APITestCase):
             print("Request params:", params)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_dairy_information_list(self):
+        url = reverse('dairy-information-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+
+    def test_dairy_information_create(self):
+        url = reverse('dairy-information-list')
+        data = {
+            'dairy_name': 'New Dairy',
+            'dairy_address': '456 New Street',
+            'rate_type': 'fat_snf'
+        }
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(DairyInformation.objects.count(), 2)
+
+    def test_generate_customer_bill(self):
+        # Create additional test data
+        other_customer = Customer.objects.create(
+            name='Other Customer',
+            phone='9876543210',
+            author=self.user
+        )
+        
+        Collection.objects.create(
+            collection_time='evening',
+            milk_type='cow',
+            customer=other_customer,
+            collection_date=date.today(),
+            measured='liters',
+            liters=Decimal('11.50'),
+            kg=Decimal('11.80'),
+            fat_percentage=Decimal('3.6'),
+            fat_kg=Decimal('0.38'),
+            clr=Decimal('28.6'),
+            snf_percentage=Decimal('8.6'),
+            snf_kg=Decimal('0.92'),
+            fat_rate=Decimal('45.00'),
+            snf_rate=Decimal('45.00'),
+            rate=Decimal('45.00'),
+            amount=Decimal('531.00'),
+            author=self.user
+        )
+
+        url = reverse('collection-generate-customer-bill')
+        params = {
+            'start_date': date.today().isoformat(),
+            'end_date': date.today().isoformat(),
+            'customer_ids': f"{self.customer.id},{other_customer.id}"
+        }
+        response = self.client.get(url, params)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_generate_customer_bill_invalid_customer(self):
+        url = reverse('collection-generate-customer-bill')
+        params = {
+            'start_date': date.today().isoformat(),
+            'end_date': date.today().isoformat(),
+            'customer_ids': '999999'  # Non-existent customer ID
+        }
+        response = self.client.get(url, params)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn('invalid_customer_ids', response.data)
+        self.assertEqual(response.data['invalid_customer_ids'], [999999])
+
+    def test_generate_customer_bill_missing_params(self):
+        url = reverse('collection-generate-customer-bill')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+
+    def test_generate_customer_bill_invalid_date_format(self):
+        url = reverse('collection-generate-customer-bill')
+        params = {
+            'start_date': '2024/02/20',  # Invalid format
+            'end_date': '2024/02/21',    # Invalid format
+            'customer_ids': str(self.customer.id)
+        }
+        response = self.client.get(url, params)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('error', response.data)
+
+    def test_generate_customer_bill_no_collections(self):
+        # Use a date range with no collections
+        future_date = (date.today() + timedelta(days=30)).isoformat()
+        url = reverse('collection-generate-customer-bill')
+        params = {
+            'start_date': future_date,
+            'end_date': future_date,
+            'customer_ids': str(self.customer.id)
+        }
+        response = self.client.get(url, params)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn('error', response.data)
 
 class SerializerTests(TestCase):
     def setUp(self):
@@ -401,6 +523,12 @@ class SerializerTests(TestCase):
             'amount': Decimal('486.00')
         }
 
+        self.dairy_info_data = {
+            'dairy_name': 'Test Dairy',
+            'dairy_address': '123 Test Street',
+            'rate_type': 'fat_snf'
+        }
+
     def test_customer_serializer(self):
         serializer = CustomerSerializer(data=self.customer_data)
         self.assertTrue(serializer.is_valid())
@@ -422,3 +550,7 @@ class SerializerTests(TestCase):
         
         serializer = CollectionDetailSerializer(data=data, context={'request': request})
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_dairy_information_serializer(self):
+        serializer = DairyInformationSerializer(data=self.dairy_info_data)
+        self.assertTrue(serializer.is_valid())
