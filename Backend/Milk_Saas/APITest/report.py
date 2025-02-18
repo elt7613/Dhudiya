@@ -3,27 +3,36 @@ from datetime import datetime
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyNDY1NDIzLCJpYXQiOjE3Mzk4NzM0MjMsImp0aSI6ImY4NTAzZjQwMTdiNTQ2NTU5ZmViNjVjYTYzMzZiYWYxIiwidXNlcl9pZCI6Nn0.2dJjMBTyCX4DwA5n9Qdep-T5i5MxyzJa3ZU6qgWC9Yc"
 
 headers = {
     "Authorization": f"Bearer {token}"
 }
 
 def generate_invoice(start_date, end_date):
+    """
+    Generate a milk collection report for the given date range
+    
+    Args:
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+    """
     response = requests.get(
         f'{BASE_URL}/collections/generate_report/',
-        params={'start_date': start_date, 'end_date': end_date},
+        params={
+            'start_date': start_date,
+            'end_date': end_date
+        },
         headers=headers
     )
     
     if response.status_code == 200:
-        # Get filename from Content-Disposition header or create a default one
-        filename = f"milk_invoice_{start_date}_to_{end_date}.pdf"
+        filename = f"milk_report_{start_date}_to_{end_date}.pdf"
         
         # Save the PDF
         with open(filename, 'wb') as f:
             f.write(response.content)
-        print(f"Invoice saved as {filename}")
+        print(f"Report saved as {filename}")
     else:
         # If there's an error, try to parse the JSON error message
         try:
@@ -32,5 +41,11 @@ def generate_invoice(start_date, end_date):
         except:
             print(f"Error: {response.status_code} - {response.text}")
 
-# Test the function
-generate_invoice('2025-02-14', '2025-02-21')
+# Example usage - just provide the dates
+generate_invoice('2025-02-22', '2025-02-25')
+
+# Example for generating other report types:
+# generate_invoice('2025-02-22', '2025-02-25', 'milk_purchase_summary')
+# For customer bill (requires customer parameter):
+# generate_invoice('2025-02-22', '2025-02-25', 'customer_milk_bill')
+

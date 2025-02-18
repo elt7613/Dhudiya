@@ -3,7 +3,7 @@ from datetime import datetime
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyNDY1NDIzLCJpYXQiOjE3Mzk4NzM0MjMsImp0aSI6ImY4NTAzZjQwMTdiNTQ2NTU5ZmViNjVjYTYzMzZiYWYxIiwidXNlcl9pZCI6Nn0.2dJjMBTyCX4DwA5n9Qdep-T5i5MxyzJa3ZU6qgWC9Yc"
 
 headers = {
     "Authorization": f"Bearer {token}"
@@ -11,7 +11,7 @@ headers = {
 
 def generate_report(start_date, end_date, customer_ids):
     response = requests.get(
-        f'{BASE_URL}/collections/generate_customer_bill/',
+        f'{BASE_URL}/collections/generate_customer_report/',
         params={'start_date': start_date, 'end_date': end_date, 'customer_ids': customer_ids},
         headers=headers
     )
@@ -33,4 +33,4 @@ def generate_report(start_date, end_date, customer_ids):
             print(f"Error: {response.status_code} - {response.text}")
 
 # Test the function
-generate_report('2025-02-14', '2025-02-14', '6')
+generate_report('2025-02-21', '2025-02-25', '2')

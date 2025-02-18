@@ -1,9 +1,9 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from rest_framework import viewsets, filters, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db.models import Prefetch, Sum, Avg, F, Min, Max
+from django.db.models import Prefetch, Sum, Avg, F, Min, Max, Q
 from django_filters.rest_framework import DjangoFilterBackend
 from django.http import HttpResponse
 from reportlab.lib import colors
@@ -13,68 +13,211 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from io import BytesIO
 from datetime import datetime, timedelta
-from .models import Collection, Customer, RateStep, MarketMilkPrice, DairyInformation
+from decimal import Decimal
+import json
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.pagination import PageNumberPagination
+from django.utils.decorators import method_decorator
+from django.views.decorators.http import condition
+from .models import Collection, Customer, MarketMilkPrice, DairyInformation
 from .serializers import (
     CollectionListSerializer, 
     CollectionDetailSerializer,
     CustomerSerializer,
-    RateStepSerializer,
     MarketMilkPriceSerializer,
     DairyInformationSerializer
 )
-from .filters import CollectionFilter, RateStepFilter
+from .filters import CollectionFilter
+from wallet.models import Wallet
 
-class MarketMilkPriceViewSet(viewsets.ModelViewSet):
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
+
+class BaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        return self.queryset.filter(author=self.request.user, is_active=True)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        instance.soft_delete()
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return Response(
+                {
+                    'message': f'{instance.__class__.__name__} deleted successfully',
+                    'id': instance.id
+                },
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': f'Failed to delete {instance.__class__.__name__}.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (ValidationError, DRFValidationError)):
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return super().handle_exception(exc)
+
+class MarketMilkPriceViewSet(BaseViewSet):
+    queryset = MarketMilkPrice.objects.all()
     serializer_class = MarketMilkPriceSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['price']
     ordering_fields = ['price', 'created_at']
     ordering = ['-created_at']
 
-    def get_queryset(self):
-        return MarketMilkPrice.objects.filter(author=self.request.user)
+    def list(self, request, *args, **kwargs):
+        # Get only the most recent active milk price
+        milk_price = MarketMilkPrice.objects.filter(
+            author=request.user,
+            is_active=True
+        ).order_by('-created_at').first()
 
-    def perform_destroy(self, instance):
-        instance.soft_delete()
-        return Response({'message': 'Market milk price deleted successfully'}, status=status.HTTP_200_OK)
-    
-class DairyInformationViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+        if milk_price:
+            serializer = self.get_serializer(milk_price)
+            return Response(serializer.data)
+        return Response(
+            {
+                'detail': 'No milk price found.'
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    def create(self, request, *args, **kwargs):
+        try:
+            # Soft delete any existing active milk price
+            existing_price = MarketMilkPrice.objects.filter(
+                author=request.user,
+                is_active=True
+            ).first()
+            
+            if existing_price:
+                existing_price.soft_delete()
+
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'Failed to create milk price. Please check your input.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'Failed to update milk price. Please check your input.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class DairyInformationViewSet(BaseViewSet):
+    queryset = DairyInformation.objects.all()
     serializer_class = DairyInformationSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['dairy_name']
     ordering_fields = ['dairy_name', 'rate_type', 'created_at']
     ordering = ['-created_at']
 
-    def get_queryset(self):
-        return DairyInformation.objects.filter(author=self.request.user)
+    def list(self, request, *args, **kwargs):
+        # Get only the most recent active dairy information
+        dairy_info = DairyInformation.objects.filter(
+            author=request.user,
+            is_active=True
+        ).order_by('-created_at').first()
 
-    def perform_destroy(self, instance):
-        instance.soft_delete()
-        return Response({'message': 'Dairy information deleted successfully'}, status=status.HTTP_200_OK)
+        if dairy_info:
+            serializer = self.get_serializer(dairy_info)
+            return Response(serializer.data)
+        return Response(
+            {
+                'detail': 'No dairy information found.'
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
 
+    def create(self, request, *args, **kwargs):
+        try:
+            # Soft delete any existing active dairy information
+            existing_dairy = DairyInformation.objects.filter(
+                author=request.user,
+                is_active=True
+            ).first()
+            
+            if existing_dairy:
+                existing_dairy.soft_delete()
 
-class CustomerViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'Failed to create dairy information. Please check your input.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'Failed to update dairy information. Please check your input.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class CustomerViewSet(BaseViewSet):
+    queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'phone']
 
-    def get_queryset(self):
-        return Customer.objects.filter(author=self.request.user)
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            partial = kwargs.pop('partial', False)
+            serializer = self.get_serializer(instance, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'Failed to update customer. Please check your input.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    def perform_destroy(self, instance):
-        instance.soft_delete()
-        return Response({'message': 'Customer deleted successfully'}, status=status.HTTP_200_OK)
+    def perform_update(self, serializer):
+        serializer.save()
 
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response({'message': 'Customer deleted successfully'}, status=status.HTTP_200_OK)
-
-class CollectionViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+class CollectionViewSet(BaseViewSet):
+    queryset = Collection.objects.select_related('customer', 'author')
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['collection_time', 'milk_type', 'collection_date']
     search_fields = ['customer__name']
@@ -86,31 +229,61 @@ class CollectionViewSet(viewsets.ModelViewSet):
     ordering = ['-collection_date', '-created_at']
     filterset_class = CollectionFilter
 
-    def get_queryset(self):
-        queryset = Collection.objects.select_related(
-            'customer', 'author'
-        ).filter(author=self.request.user)
-        return queryset
-
     def get_serializer_class(self):
         if self.action == 'list':
             return CollectionListSerializer
         return CollectionDetailSerializer
 
-    def perform_destroy(self, instance):
-        instance.soft_delete()
-        return Response({'message': 'Collection deleted successfully'}, status=status.HTTP_200_OK)
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response({'message': 'Collection deleted successfully'}, status=status.HTTP_200_OK)
-
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
+        # Check if this is first collection for this customer today
+        collection_date = request.data.get('collection_date')
+        customer_id = request.data.get('customer')
+        base_snf_percentage = Decimal(str(request.data.get('base_snf_percentage', '9.0')))
+        
+        # Validate base_snf_percentage range
+        if base_snf_percentage < Decimal('9.0') or base_snf_percentage > Decimal('9.5'):
+            return Response(
+                {'error': 'Base SNF percentage must be between 9.0 and 9.5'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        today_collections = Collection.objects.filter(
+            author=request.user,
+            customer_id=customer_id,
+            collection_date=collection_date,
+            is_active=True
+        )
+        
+        if not today_collections.exists():
+            # This will be first collection for this customer today
+            try:
+                wallet = Wallet.objects.get(user=request.user)
+                
+                # Determine required balance based on base_snf_percentage
+                default_snf = Decimal('9.0')
+                required_balance = Decimal('5.00') if base_snf_percentage != default_snf else Decimal('2.00')
+                
+                if wallet.balance < required_balance:
+                    return Response(
+                        {
+                            'error': 'Insufficient wallet balance. Please add money to your wallet to create new collections.',
+                            'required_balance': str(required_balance),
+                            'current_balance': str(wallet.balance),
+                            'message': 'Higher balance required due to SNF adjustment' if required_balance == Decimal('5.00') else None
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Wallet.DoesNotExist:
+                return Response(
+                    {'error': 'No wallet found. Please contact support.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -124,49 +297,41 @@ class CollectionViewSet(viewsets.ModelViewSet):
         """Generate the purchase report section with pagination support"""
         elements = []
         
-        # Get dairy information for the user
         dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
-        # Add dairy name at top center with underline
         dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
         elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
         elements.append(Spacer(1, 5))
         
-        # Add title (centered and underlined)
         elements.append(Paragraph('PURCHASE REPORT', styles['ReportTitle']))
         
-        # Get date range
         start_date = collections.aggregate(min_date=Min('collection_date'))['min_date']
         end_date = collections.aggregate(max_date=Max('collection_date'))['max_date']
         
-        # Add date range
         elements.append(Paragraph(
             f"Dated from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
             styles['DateRange']
         ))
         elements.append(Spacer(1, 8))
         
-        # Group by date and calculate totals
         daily_data = []
-        header = ['DATE', 'WEIGHT (KG)', 'LITERS', 'FAT %', 'FAT KG.', 'SNF %', 'SNF KG.', 'AMOUNT RS.']
+        header = ['DATE', 'WEIGHT (KG)', 'FAT %', 'FAT KG.', 'SNF %', 'SNF KG.', 'PUR.AMT', 'AMOUNT RS.']
         
         # Initialize grand totals
         grand_totals = {
             'total_kg': 0,
-            'total_liters': 0,
             'total_fat_kg': 0,
             'total_snf_kg': 0,
             'total_amount': 0,
+            'purchase_amount': 0,
             'fat_percentage_sum': 0,
             'snf_percentage_sum': 0,
             'count': 0
         }
         
-        # Collect all daily data
         for date in collections.values('collection_date').distinct().order_by('collection_date'):
             date_collections = collections.filter(collection_date=date['collection_date'])
             daily_totals = date_collections.aggregate(
                 total_kg=Sum('kg'),
-                total_liters=Sum('liters'),
                 total_fat_kg=Sum('fat_kg'),
                 total_snf_kg=Sum('snf_kg'),
                 total_amount=Sum('amount'),
@@ -174,12 +339,15 @@ class CollectionViewSet(viewsets.ModelViewSet):
                 avg_snf_percentage=Avg('snf_percentage')
             )
             
+            purchase_amount = daily_totals['total_amount']
+            final_amount = int(purchase_amount * Decimal('0.999'))
+            
             # Update grand totals
             grand_totals['total_kg'] += daily_totals['total_kg']
-            grand_totals['total_liters'] += daily_totals['total_liters']
             grand_totals['total_fat_kg'] += daily_totals['total_fat_kg']
             grand_totals['total_snf_kg'] += daily_totals['total_snf_kg']
-            grand_totals['total_amount'] += daily_totals['total_amount']
+            grand_totals['purchase_amount'] += purchase_amount
+            grand_totals['total_amount'] += final_amount
             grand_totals['fat_percentage_sum'] += daily_totals['avg_fat_percentage']
             grand_totals['snf_percentage_sum'] += daily_totals['avg_snf_percentage']
             grand_totals['count'] += 1
@@ -187,32 +355,27 @@ class CollectionViewSet(viewsets.ModelViewSet):
             daily_data.append([
                 date['collection_date'].strftime('%d/%m/%Y'),
                 f"{daily_totals['total_kg']:.2f}",
-                f"{daily_totals['total_liters']:.2f}",
                 f"{daily_totals['avg_fat_percentage']:.2f}",
                 f"{daily_totals['total_fat_kg']:.3f}",
                 f"{daily_totals['avg_snf_percentage']:.2f}",
                 f"{daily_totals['total_snf_kg']:.3f}",
-                f"{daily_totals['total_amount']:.2f}"
+                f"{purchase_amount:.2f}",
+                f"{final_amount}"
             ])
 
-        # Calculate how many rows can fit on one page (excluding header and totals)
-        # This is an estimate based on the page size and row heights
-        rows_per_page = 25  # Adjust this number based on testing with your actual data
-        
-        # Split data into pages
+        rows_per_page = 25
         total_rows = len(daily_data)
         total_pages = (total_rows + rows_per_page - 1) // rows_per_page
         
-        # Create table with specific column widths
         col_widths = [
-            doc.width * 0.15,  # DATE
+            doc.width * 0.13,  # DATE
             doc.width * 0.12, # WEIGHT
-            doc.width * 0.12, # LITERS
             doc.width * 0.12, # FAT %
             doc.width * 0.12, # FAT KG
             doc.width * 0.12, # SNF %
             doc.width * 0.12, # SNF KG
-            doc.width * 0.13  # AMOUNT
+            doc.width * 0.13, # PUR.AMT
+            doc.width * 0.14  # AMOUNT
         ]
 
         # Process each page
@@ -220,43 +383,38 @@ class CollectionViewSet(viewsets.ModelViewSet):
             start_idx = page_num * rows_per_page
             end_idx = min((page_num + 1) * rows_per_page, total_rows)
             
-            # Get data for current page
             page_data = daily_data[start_idx:end_idx]
             
-            # Add total row only on the last page
             if page_num == total_pages - 1:
                 avg_fat = grand_totals['fat_percentage_sum'] / grand_totals['count'] if grand_totals['count'] > 0 else 0
                 avg_snf = grand_totals['snf_percentage_sum'] / grand_totals['count'] if grand_totals['count'] > 0 else 0
                 page_data.append([
                     'TOTAL:',
                     f"{grand_totals['total_kg']:.2f}",
-                    f"{grand_totals['total_liters']:.2f}",
                     f"{avg_fat:.2f}",
                     f"{grand_totals['total_fat_kg']:.3f}",
                     f"{avg_snf:.2f}",
                     f"{grand_totals['total_snf_kg']:.3f}",
-                    f"{grand_totals['total_amount']:.2f}"
+                    f"{grand_totals['purchase_amount']:.2f}",
+                    f"{int(grand_totals['total_amount'])}"
                 ])
-            
-            # Create table for current page
+
             table = Table([header] + page_data, colWidths=col_widths)
             
-            # Apply table styles
             table_style = [
-                # Header style
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('ALIGN', (0, 0), (0, -1), 'LEFT'),  # Left align dates
+                ('ALIGN', (-2, 1), (-2, -1), 'RIGHT'),  # Right align purchase amount
+                ('ALIGN', (-1, 1), (-1, -1), 'RIGHT'),  # Right align final amount
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                # Reduce cell padding
                 ('TOPPADDING', (0, 0), (-1, -1), 3),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                 ('LEFTPADDING', (0, 0), (-1, -1), 3),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ]
             
-            # Add total row style if this is the last page
             if page_num == total_pages - 1:
                 table_style.extend([
                     ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
@@ -267,28 +425,15 @@ class CollectionViewSet(viewsets.ModelViewSet):
             table.setStyle(TableStyle(table_style))
             elements.append(table)
             
-            # Add page number
             elements.append(Spacer(1, 10))
             elements.append(Paragraph(
                 f'Page {page_num + 1} of {total_pages}',
                 styles['PageNumber']
             ))
             
-            # Add page break if not the last page
             if page_num < total_pages - 1:
                 elements.append(PageBreak())
-                # Repeat the header information on new pages
-                elements.append(PageBreak())
-                elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
-                elements.append(Spacer(1, 5))
-                elements.append(Paragraph('PURCHASE REPORT', styles['ReportTitle']))
-                elements.append(Paragraph(
-                    f"Dated from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
-                    styles['DateRange']
-                ))
-                elements.append(Spacer(1, 8))
         
-        # Add final page break after purchase report
         elements.append(PageBreak())
         return elements
 
@@ -296,55 +441,45 @@ class CollectionViewSet(viewsets.ModelViewSet):
         """Generate the milk purchase summary section with pagination support"""
         elements = []
         
-        # Force start on new page
         elements.append(PageBreak())
         
-        # Get dairy information for the user
         dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
-        # Add dairy name at top center with underline
         dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
         elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
         elements.append(Spacer(1, 5))
         
-        # Add title (centered)
         elements.append(Paragraph('MILK PURCHASE SUMMARY', styles['ReportTitle']))
         
-        # Get date range
         start_date = collections.aggregate(min_date=Min('collection_date'))['min_date']
         end_date = collections.aggregate(max_date=Max('collection_date'))['max_date']
         
-        # Add date range
         elements.append(Paragraph(
             f"Dated from {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
             styles['DateRange']
         ))
         elements.append(Spacer(1, 8))
         
-        # Group by customer and calculate totals
         customer_data = []
-        header = ['PARTY NAME', 'PHONE', 'WEIGHT', 'LITERS', 'FAT %', 'FAT Kg.', 'SNF %', 'SNF Kg.', 'TOT. AMT.']
+        header = ['PARTY NAME', 'PHONE', 'WEIGHT', 'FAT %', 'FAT Kg.', 'SNF %', 'SNF Kg.', 'PUR.AMT', 'TOT. AMT.']
         
         # Initialize grand totals
         grand_totals = {
             'total_weight': 0,
-            'total_liters': 0,
             'total_fat_kg': 0,
             'total_snf_kg': 0,
+            'purchase_amount': 0,
             'total_amount': 0,
             'fat_percentage_sum': 0,
             'snf_percentage_sum': 0,
             'customer_count': 0
         }
         
-        customers = Customer.objects.filter(
-            collection__in=collections
-        ).distinct()
+        customers = Customer.objects.filter(collection__in=collections).distinct()
         
         for customer in customers:
             customer_collections = collections.filter(customer=customer)
             customer_totals = customer_collections.aggregate(
                 total_weight=Sum('kg'),
-                total_liters=Sum('liters'),
                 total_fat_kg=Sum('fat_kg'),
                 total_snf_kg=Sum('snf_kg'),
                 total_amount=Sum('amount'),
@@ -352,52 +487,50 @@ class CollectionViewSet(viewsets.ModelViewSet):
                 avg_snf_percentage=Avg('snf_percentage')
             )
             
+            purchase_amount = customer_totals['total_amount']
+            final_amount = int(purchase_amount * Decimal('0.999'))
+            
             # Update grand totals
             grand_totals['total_weight'] += customer_totals['total_weight']
-            grand_totals['total_liters'] += customer_totals['total_liters']
             grand_totals['total_fat_kg'] += customer_totals['total_fat_kg']
             grand_totals['total_snf_kg'] += customer_totals['total_snf_kg']
-            grand_totals['total_amount'] += customer_totals['total_amount']
+            grand_totals['purchase_amount'] += purchase_amount
+            grand_totals['total_amount'] += final_amount
             grand_totals['fat_percentage_sum'] += customer_totals['avg_fat_percentage']
             grand_totals['snf_percentage_sum'] += customer_totals['avg_snf_percentage']
             grand_totals['customer_count'] += 1
             
             customer_data.append([
-                f"{customer.id}-{customer.name}",  # Combined ID and name
-                customer.phone or '-',  # Phone number with fallback
+                f"{customer.id}-{customer.name}",
+                customer.phone or '-',
                 f"{customer_totals['total_weight']:.2f}",
-                f"{customer_totals['total_liters']:.2f}",
                 f"{customer_totals['avg_fat_percentage']:.2f}",
                 f"{customer_totals['total_fat_kg']:.3f}",
                 f"{customer_totals['avg_snf_percentage']:.2f}",
                 f"{customer_totals['total_snf_kg']:.3f}",
-                f"{customer_totals['total_amount']:.2f}"
+                f"{purchase_amount:.2f}",
+                f"{final_amount}"
             ])
 
-        # Calculate how many rows can fit on one page (excluding header and totals)
-        rows_per_page = 35  # Adjust this number based on testing with your actual data
-        
-        # Split data into pages
+        rows_per_page = 35
         total_rows = len(customer_data)
         total_pages = (total_rows + rows_per_page - 1) // rows_per_page
         
-        # Create table with specific column widths
         col_widths = [
-            doc.width * 0.18,  # PARTY NAME
-            doc.width * 0.12,  # PHONE
+            doc.width * 0.15,  # PARTY NAME
+            doc.width * 0.11,  # PHONE
             doc.width * 0.10,  # WEIGHT
-            doc.width * 0.10,  # LITERS
-            doc.width * 0.10,  # FAT %
-            doc.width * 0.10,  # FAT KG
-            doc.width * 0.10,  # SNF %
-            doc.width * 0.10,  # SNF KG
-            doc.width * 0.10   # TOT. AMT.
+            doc.width * 0.09,  # FAT %
+            doc.width * 0.11,  # FAT KG
+            doc.width * 0.09,  # SNF %
+            doc.width * 0.11,  # SNF KG
+            doc.width * 0.12,  # PUR.AMT
+            doc.width * 0.12   # TOT. AMT.
         ]
 
         # Process each page
         for page_num in range(total_pages):
             if page_num > 0:
-                # Repeat header for new pages
                 elements.append(PageBreak())
                 elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
                 elements.append(Spacer(1, 5))
@@ -411,256 +544,170 @@ class CollectionViewSet(viewsets.ModelViewSet):
             start_idx = page_num * rows_per_page
             end_idx = min((page_num + 1) * rows_per_page, total_rows)
             
-            # Get data for current page
             page_data = customer_data[start_idx:end_idx]
             
-            # Add total row only on the last page
             if page_num == total_pages - 1:
                 avg_fat = grand_totals['fat_percentage_sum'] / grand_totals['customer_count'] if grand_totals['customer_count'] > 0 else 0
                 avg_snf = grand_totals['snf_percentage_sum'] / grand_totals['customer_count'] if grand_totals['customer_count'] > 0 else 0
                 page_data.append([
                     'TOTAL :',
-                    f"{grand_totals['customer_count']} Customers",  # Show total number of customers
+                    f"{grand_totals['customer_count']} Customers",
                     f"{grand_totals['total_weight']:.2f}",
-                    f"{grand_totals['total_liters']:.2f}",
                     f"{avg_fat:.2f}",
                     f"{grand_totals['total_fat_kg']:.3f}",
                     f"{avg_snf:.2f}",
                     f"{grand_totals['total_snf_kg']:.3f}",
-                    f"{grand_totals['total_amount']:.2f}"
-                ])
-                
-                # Add final total
-                page_data.append([
-                    'Total Rs.',
-                    '',  # Empty phone cell
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    f"{grand_totals['total_amount']:.2f}"
+                    f"{grand_totals['purchase_amount']:.2f}",
+                    f"{int(grand_totals['total_amount'])}"
                 ])
             
-            # Create table for current page
-            table = Table([header] + page_data, colWidths=col_widths)
+            table = Table([header] + page_data, colWidths=col_widths, repeatRows=1)
             
-            # Apply table styles
             table_style = [
-                # Header style
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),  # Match purchase report font size
-                ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),  # Right align all cells
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),   # Left align party names
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                ('ALIGN', (0, 0), (1, -1), 'LEFT'),  # Left align party names and phone
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                # Reduce cell padding
                 ('TOPPADDING', (0, 0), (-1, -1), 3),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                 ('LEFTPADDING', (0, 0), (-1, -1), 3),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ]
             
-            # Add total row style if this is the last page
             if page_num == total_pages - 1:
                 table_style.extend([
-                    ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-                    ('LINEABOVE', (0, -2), (-1, -2), 1, colors.black),
-                    ('LINEBELOW', (0, -2), (-1, -2), 1, colors.black),
+                    ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                    ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
+                    ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),
                 ])
             
             table.setStyle(TableStyle(table_style))
             elements.append(table)
             
-            # Add page number for all pages
             elements.append(Spacer(1, 10))
             elements.append(Paragraph(
                 f'Page {page_num + 1} of {total_pages}',
                 styles['PageNumber']
             ))
             
-            # Add page break if not the last page
             if page_num < total_pages - 1:
                 elements.append(PageBreak())
         
-        # Add final page break after milk purchase summary
         elements.append(PageBreak())
         return elements
 
-    def _generate_customer_milk_bill_v2(self, collections, customer, doc, styles):
-        """Generate the milk bill section for a specific customer in the format matching the image"""
+    def _generate_customer_milk_bill(self, collections, doc, styles):
+        """Generate the customer milk bill section"""
         elements = []
         
-        # Force start on new page
-        elements.append(PageBreak())
-        
-        # Get dairy information for the user
         dairy_info = DairyInformation.objects.filter(author=self.request.user, is_active=True).first()
-        # Add dairy name at top center with underline
         dairy_name = dairy_info.dairy_name if dairy_info else self.request.user.username
         elements.append(Paragraph(f'<u>{dairy_name}</u>', styles['DairyName']))
         elements.append(Spacer(1, 5))
         
-        # Add Milk Bill title
-        elements.append(Paragraph("Milk Bill", styles['ReportTitle']))
-        elements.append(Spacer(1, 5))
+        elements.append(Paragraph('MILK BILL', styles['ReportTitle']))
         
-        # Party details
-        elements.append(Paragraph(f"PARTY NAME: {customer.id}-{customer.name}", styles['PartyName']))
-        elements.append(Spacer(1, 5))
+        start_date = collections.aggregate(min_date=Min('collection_date'))['min_date']
+        end_date = collections.aggregate(max_date=Max('collection_date'))['max_date']
+        customer = collections.first().customer
         
-        # Get date range
-        date_range = collections.filter(customer=customer).aggregate(
-            min_date=Min('collection_date'),
-            max_date=Max('collection_date')
-        )
-        
-        # Handle case where date_range values might be None
-        min_date = date_range['min_date'].strftime('%d/%m/%y') if date_range['min_date'] else ''
-        max_date = date_range['max_date'].strftime('%d/%m/%y') if date_range['max_date'] else ''
+        elements.append(Paragraph(f"Customer: {customer.id}-{customer.name}", styles['CustomerName']))
+        if customer.phone:
+            elements.append(Paragraph(f"Phone: {customer.phone}", styles['CustomerPhone']))
         
         elements.append(Paragraph(
-            f"DATE FROM {min_date} TO {max_date}",
+            f"Period: {start_date.strftime('%d/%m/%Y')} to {end_date.strftime('%d/%m/%Y')}",
             styles['DateRange']
         ))
         elements.append(Spacer(1, 8))
         
-        # Daily collection details
-        daily_data = []
-        header = ['DATE', 'WEIGHT', 'LITERS', 'FAT%', 'CLR', 'SNF%', 'FAT Kg.', 'FAT Rt', 'SNF Kg.', 'SNF Rt', 'RATE', 'VALUE']
-        
-        customer_collections = collections.filter(customer=customer).order_by('collection_date', 'collection_time')
+        data = []
+        header = ['DATE', 'TIME', 'TYPE', 'KG', 'FAT %', 'FAT KG', 'SNF %', 'SNF KG', 'RATE', 'AMOUNT']
+        data.append(header)
         
         # Initialize totals
         totals = {
-            'weight': 0,
-            'liters': 0,
-            'fat_kg': 0,
-            'snf_kg': 0,
-            'amount': 0,
-            'fat_sum': 0,
-            'snf_sum': 0,
+            'total_kg': 0,
+            'total_fat_kg': 0,
+            'total_snf_kg': 0,
+            'total_amount': 0,
+            'fat_percentage_sum': 0,
+            'snf_percentage_sum': 0,
             'count': 0
         }
         
-        for collection in customer_collections:
-            # Handle null values with default empty strings
-            fat_rate = f"{collection.fat_rate:.2f}" if collection.fat_rate is not None else ""
-            snf_rate = f"{collection.snf_rate:.2f}" if collection.snf_rate is not None else ""
-            
-            daily_data.append([
-                collection.collection_date.strftime('%d/%m/%y'),
+        for collection in collections.order_by('collection_date', 'collection_time'):
+            row = [
+                collection.collection_date.strftime('%d/%m/%Y'),
+                collection.get_collection_time_display(),
+                collection.get_milk_type_display(),
                 f"{collection.kg:.2f}",
-                f"{collection.liters:.2f}",
                 f"{collection.fat_percentage:.2f}",
-                f"{collection.clr:.2f}",
-                f"{collection.snf_percentage:.2f}",
                 f"{collection.fat_kg:.3f}",
-                fat_rate,
+                f"{collection.snf_percentage:.2f}",
                 f"{collection.snf_kg:.3f}",
-                snf_rate,
                 f"{collection.rate:.2f}",
                 f"{collection.amount:.2f}"
-            ])
+            ]
+            data.append(row)
             
             # Update totals
-            totals['weight'] += collection.kg
-            totals['liters'] += collection.liters
-            totals['fat_kg'] += collection.fat_kg
-            totals['snf_kg'] += collection.snf_kg
-            totals['amount'] += collection.amount
-            totals['fat_sum'] += collection.fat_percentage
-            totals['snf_sum'] += collection.snf_percentage
+            totals['total_kg'] += collection.kg
+            totals['total_fat_kg'] += collection.fat_kg
+            totals['total_snf_kg'] += collection.snf_kg
+            totals['total_amount'] += collection.amount
+            totals['fat_percentage_sum'] += collection.fat_percentage
+            totals['snf_percentage_sum'] += collection.snf_percentage
             totals['count'] += 1
         
         # Add totals row
-        avg_fat = totals['fat_sum'] / totals['count'] if totals['count'] > 0 else 0
-        avg_snf = totals['snf_sum'] / totals['count'] if totals['count'] > 0 else 0
-        
-        daily_data.append([
-            'TOTAL :',
-            f"{totals['weight']:.2f}",
-            f"{totals['liters']:.2f}",
+        avg_fat = totals['fat_percentage_sum'] / totals['count'] if totals['count'] > 0 else 0
+        avg_snf = totals['snf_percentage_sum'] / totals['count'] if totals['count'] > 0 else 0
+        totals_row = [
+            'TOTAL', '', '',
+            f"{totals['total_kg']:.2f}",
             f"{avg_fat:.2f}",
-            '',  # CLR
+            f"{totals['total_fat_kg']:.3f}",
             f"{avg_snf:.2f}",
-            f"{totals['fat_kg']:.3f}",
-            '',  # FAT Rt
-            f"{totals['snf_kg']:.3f}",
-            '',  # SNF Rt
-            '',  # RATE
-            f"{totals['amount']:.2f}"
-        ])
-        
-        # Calculate available height for table
-        available_height = doc.height - (doc.topMargin + doc.bottomMargin + 120)  # 120 for headers and spacing
-        
-        # Calculate row height (including padding)
-        row_height = 20  # Approximate height per row in points
-        
-        # Calculate max rows that can fit on one page
-        max_rows = int(available_height / row_height)
-        
-        # If data exceeds max rows, adjust font size and spacing
-        if len(daily_data) + 1 > max_rows:  # +1 for header
-            table_style_font_size = 8
-            padding = 2
-        else:
-            table_style_font_size = 10
-            padding = 3
-        
-        # Create table with specific column widths
-        col_widths = [
-            doc.width * 0.09,  # DATE
-            doc.width * 0.08,  # WEIGHT
-            doc.width * 0.08,  # LITERS
-            doc.width * 0.07,  # FAT%
-            doc.width * 0.07,  # CLR
-            doc.width * 0.07,  # SNF%
-            doc.width * 0.08,  # FAT Kg
-            doc.width * 0.08,  # FAT Rt
-            doc.width * 0.08,  # SNF Kg
-            doc.width * 0.08,  # SNF Rt
-            doc.width * 0.08,  # RATE
-            doc.width * 0.14   # VALUE
+            f"{totals['total_snf_kg']:.3f}",
+            '',
+            f"{totals['total_amount']:.2f}"
         ]
-        
-        table = Table([header] + daily_data, colWidths=col_widths)
-        
-        # Apply table styles
-        table_style = [
-            # Header style
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), table_style_font_size),
+        data.append(totals_row)
+
+        # Create table
+        table = Table(data)
+        table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),  # Left align dates
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            # Reduce cell padding
-            ('TOPPADDING', (0, 0), (-1, -1), padding),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), padding),
-            ('LEFTPADDING', (0, 0), (-1, -1), padding),
-            ('RIGHTPADDING', (0, 0), (-1, -1), padding),
-            # Total row style
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, -1), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
-            ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),
-        ]
+            ('FONTSIZE', (0, -1), (-1, -1), 10),
+            ('TOPPADDING', (0, -1), (-1, -1), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ALIGN', (-1, 1), (-1, -1), 'RIGHT'),
+            ('ALIGN', (-2, 1), (-2, -1), 'RIGHT'),
+        ]))
         
-        table.setStyle(TableStyle(table_style))
         elements.append(table)
-        
+        elements.append(PageBreak())
         return elements
 
     @action(detail=False, methods=['get'])
     def generate_report(self, request):
-        """Generate a comprehensive report PDF containing all three report types"""
+        """Generate a milk purchase report PDF for the given date range"""
         # Get date range from query parameters
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         
-        if not start_date or not end_date:
+        if not all([start_date, end_date]):
             return Response(
-                {'error': 'Both start_date and end_date are required query parameters'},
+                {'error': 'start_date and end_date are required query parameters'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -764,6 +811,24 @@ class CollectionViewSet(viewsets.ModelViewSet):
             spaceAfter=2,
             alignment=0  # Left alignment
         ))
+
+        # Add the missing CustomerName and CustomerPhone styles
+        styles.add(ParagraphStyle(
+            name='CustomerName',
+            parent=styles['Normal'],
+            fontSize=12,
+            fontName='Helvetica-Bold',
+            spaceAfter=2,
+            alignment=0  # Left alignment
+        ))
+
+        styles.add(ParagraphStyle(
+            name='CustomerPhone',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=2,
+            alignment=0  # Left alignment
+        ))
         
         # Generate all elements
         elements = []
@@ -781,9 +846,13 @@ class CollectionViewSet(viewsets.ModelViewSet):
         # Add individual customer milk bills (start on new page)
         customers = Customer.objects.filter(collection__in=collections).distinct()
         for customer in customers:
-            elements.extend(self._generate_customer_milk_bill_v2(collections, customer, doc, styles))
-            if customer != customers.last():
-                elements.append(PageBreak())
+            customer_collections = collections.filter(customer=customer)
+            if customer_collections.exists():
+                elements.extend(self._generate_customer_milk_bill(
+                    customer_collections, doc, styles
+                ))
+                if customer != customers.last():
+                    elements.append(PageBreak())
         
         # Build PDF
         doc.build(elements)
@@ -796,7 +865,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
         return response
 
     @action(detail=False, methods=['get'])
-    def generate_customer_bill(self, request):
+    def generate_customer_report(self, request):
         """Generate milk bill PDF for specific customers"""
         # Get date range and customer IDs from query parameters
         start_date = request.query_params.get('start_date')
@@ -889,10 +958,18 @@ class CollectionViewSet(viewsets.ModelViewSet):
         ))
         
         styles.add(ParagraphStyle(
-            name='PartyName',
+            name='CustomerName',
             parent=styles['Normal'],
             fontSize=12,
             fontName='Helvetica-Bold',
+            spaceAfter=2,
+            alignment=0  # Left alignment
+        ))
+
+        styles.add(ParagraphStyle(
+            name='CustomerPhone',
+            parent=styles['Normal'],
+            fontSize=11,
             spaceAfter=2,
             alignment=0  # Left alignment
         ))
@@ -917,9 +994,11 @@ class CollectionViewSet(viewsets.ModelViewSet):
         for customer in customers:
             customer_collections = collections.filter(customer=customer)
             if customer_collections.exists():
-                elements.extend(self._generate_customer_milk_bill_v2(
-                    customer_collections, customer, doc, styles
+                elements.extend(self._generate_customer_milk_bill(
+                    customer_collections, doc, styles
                 ))
+                if customer != customers.last():
+                    elements.append(PageBreak())
         
         # Build PDF
         doc.build(elements)
@@ -927,30 +1006,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
         # Prepare response
         buffer.seek(0)
         response = HttpResponse(buffer.read(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="milk_bills_{start_date}_to_{end_date}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="customer_reports_{start_date}_to_{end_date}.pdf"'
         
         return response
-
-class RateStepViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
-    serializer_class = RateStepSerializer
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_class = RateStepFilter
-    ordering_fields = ['rate', 'fat_from', 'fat_to', 'created_at']
-    ordering = ['-created_at']
-    
-    def get_queryset(self):
-        return RateStep.objects.filter(author=self.request.user)
-
-    def perform_destroy(self, instance):
-        instance.soft_delete()
-        return Response(
-            {'message': 'Rate step deleted successfully'}, 
-            status=status.HTTP_200_OK
-        )
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        self.perform_destroy(instance)
-        return Response({'message': 'Rate step deleted successfully'}, status=status.HTTP_200_OK)
 

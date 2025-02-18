@@ -4,6 +4,7 @@ from . import views
 
 router = DefaultRouter()
 router.register(r'wallet', views.WalletViewSet, basename='wallet')
+router.register(r'transactions', views.WalletTransactionViewSet, basename='wallet-transaction')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -1,3 +1,16 @@
 # Logs
 logs/
 *.log 
+
+# Docs
+Docs/
+
+# Test
+APITest/
+
+
+rzp.csv
+
+.env
+
+test_case_step.md

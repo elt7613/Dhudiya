@@ -2,7 +2,8 @@ import requests
 
 BASE_URL = 'http://127.0.0.1:8000/api/collector'
 
-token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMTE4NDYwLCJpYXQiOjE3Mzk1MjY0NjAsImp0aSI6ImM4NGM4N2FhYzVmZjQ0ZWQ5OGQ4ZWQ0NjJiNjEwOGU0IiwidXNlcl9pZCI6M30.9yAKs1hQlUjjv0Jl4P5SnV4JEgIfJbOxx46NUhjDiIg"
+
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQyMzg5MTIyLCJpYXQiOjE3Mzk3OTcxMjIsImp0aSI6IjY4Zjg1ZTQ1ZTUyMTRkYjU5ZjZlMGM5M2Q2MWRmNzMwIiwidXNlcl9pZCI6Mn0.tDW4q6MiVkjqUXf8ltKl7TS0mnIjDyTV0R7LHnMFZ0Q"
 
 headers = {
     "Authorization": f"Bearer {token}"
@@ -10,12 +11,25 @@ headers = {
 
 def create_dairy_info():
     data = {
-        "dairy_name": "Dairy 1",
+        "dairy_name": "Kun dairy Milk",
         "dairy_address": "123 Main St, Anytown, USA",
         "rate_type": "fat_snf"
     }
     response = requests.post(f"{BASE_URL}/dairy-information/", json=data, headers=headers)
     print(response.json())
 
+def get_dairy_info():
+    response = requests.get(f"{BASE_URL}/dairy-information/", headers=headers)
+    print(response.json())
+
+def update_dairy_info(dairy_id):
+    data = {
+        "dairy_name": "Kun  Milk",
+        "dairy_address": "123 Main St, Anytown, USA",
+        "rate_type": "fat_snf"
+    }
+    response = requests.put(f"{BASE_URL}/dairy-information/{dairy_id}/", json=data, headers=headers)
+    print(response.json())
+
 if __name__ == "__main__":
-    create_dairy_info()
+    update_dairy_info(1)

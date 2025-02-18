@@ -1,556 +1,757 @@
-from django.test import TestCase, Client
-from django.urls import reverse
-from django.contrib.auth import get_user_model
-from rest_framework.test import APITestCase, APIClient
-from rest_framework import status
 from decimal import Decimal
-from datetime import date, datetime, timedelta
-from rest_framework.test import APIRequestFactory
-from django.db.models import Q
-from .models import Customer, Collection, RateStep, MarketMilkPrice, DairyInformation
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APITestCase, APIClient
+from datetime import timedelta
+from collector.serializers import CollectionListSerializer
+
+from .models import (
+    Customer,
+    MarketMilkPrice,
+    DairyInformation,
+    Collection
+)
+from wallet.models import Wallet
 from .serializers import (
     CustomerSerializer,
-    CollectionListSerializer,
     CollectionDetailSerializer,
-    RateStepSerializer,
     MarketMilkPriceSerializer,
     DairyInformationSerializer
 )
 
 User = get_user_model()
 
-class ModelTests(TestCase):
+class BaseTestCase(APITestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            username='testuser',
-            password='testpass123',
-            phone_number='9876543210'
-        )
+        # Create a unique test user for each test using a counter
+        timestamp = timezone.now().strftime('%H%M%S')
+        last_4_digits = timestamp[-4:]  # Take only the last 4 digits
+        try:
+            self.user = User.objects.create_user(
+                username=f'testuser_{timestamp}',
+                password='testpass123',
+                phone_number=f'987654{last_4_digits}'  # This will be exactly 10 digits
+            )
+            self.client = APIClient()
+            self.client.force_authenticate(user=self.user)
+            
+            # Delete any existing wallet for this user (shouldn't exist, but just in case)
+            Wallet.objects.filter(user=self.user).delete()
+            
+            # Create wallet with error handling
+            self.wallet = Wallet.objects.create(
+                user=self.user,
+                balance=Decimal('10000.00')
+            )
+            
+            self.customer = Customer.objects.create(
+                name='Test Customer',
+                phone=f'987654{last_4_digits}',  # Changed from phone_number to phone
+                author=self.user
+            )
+            
+            self.market_milk_price = MarketMilkPrice.objects.create(
+                author=self.user,
+                price=Decimal('50.00')  # Changed to use only the price field
+            )
+            
+            self.dairy_information = DairyInformation.objects.create(
+                author=self.user,
+                dairy_name='Test Dairy',
+                dairy_address='Test Dairy Address',
+                rate_type='fat_snf',  # Added required field
+                is_active=True
+            )
+        except Exception as e:
+            # Clean up if any creation fails
+            self.tearDown()
+            raise
         
-        # Create test dairy information
-        self.dairy_info = DairyInformation.objects.create(
-            dairy_name='Test Dairy',
-            dairy_address='123 Test Street',
-            rate_type='fat_snf',
-            author=self.user
+    def tearDown(self):
+        try:
+            if hasattr(self, 'user'):
+                # Delete all related objects first
+                Collection.objects.filter(author=self.user).delete()
+                DairyInformation.objects.filter(author=self.user).delete()
+                MarketMilkPrice.objects.filter(author=self.user).delete()
+                Customer.objects.filter(author=self.user).delete()
+                
+                # Delete wallet before user
+                if hasattr(self, 'wallet'):
+                    self.wallet.delete()
+                else:
+                    # Just in case wallet exists but isn't attached to self
+                    Wallet.objects.filter(user=self.user).delete()
+                
+                # Delete user last
+                self.user.delete()
+                
+                # Clear instance attributes
+                if hasattr(self, 'wallet'):
+                    delattr(self, 'wallet')
+                delattr(self, 'user')
+        except Exception as e:
+            print(f"Error in tearDown: {e}")
+
+class ModelTests(BaseTestCase):
+    def test_customer_model(self):
+        customer = Customer.objects.create(
+            author=self.user,
+            name='New Customer',
+            phone='9876543211'
         )
-        
-        # Create test customer
-        self.customer = Customer.objects.create(
-            name='Test Customer',
-            phone='1234567890',
-            author=self.user
+        self.assertEqual(customer.phone, '+919876543211')
+        self.assertTrue(customer.is_active)
+        self.assertEqual(str(customer), 'New Customer')
+
+    def test_customer_phone_formatting(self):
+        # Test with different phone number formats
+        test_cases = [
+            ('9876543211', '+919876543211'),  # Regular number
+            ('09876543211', '+919876543211'),  # With leading zero
+            ('+919876543211', '+919876543211'),  # Already has +91
+            ('919876543211', '+919876543211'),  # Has 91 prefix without +
+        ]
+        for input_phone, expected_phone in test_cases:
+            with self.subTest(input_phone=input_phone):
+                customer = Customer.objects.create(
+                    author=self.user,
+                    name='Phone Test Customer',
+                    phone=input_phone
+                )
+                self.assertEqual(customer.phone, expected_phone)
+                customer.delete()
+
+    def test_market_milk_price_model(self):
+        price = MarketMilkPrice.objects.create(
+            author=self.user,
+            price=Decimal('55.50')
         )
+        self.assertEqual(str(price), '55.50')
+        self.assertTrue(price.is_active)
         
-        # Create test rate step
-        self.rate_step = RateStep.objects.create(
-            rate_type='rate per kg',
-            milk_type='cow',
-            fat_from=Decimal('3.0'),
-            fat_to=Decimal('4.0'),
-            fat_rate=Decimal('45.00'),
-            snf_from=Decimal('8.0'),
-            snf_to=Decimal('9.0'),
-            snf_rate=Decimal('45.00'),
-            author=self.user
+        # Test single active price policy
+        new_price = MarketMilkPrice.objects.create(
+            author=self.user,
+            price=Decimal('60.00')
         )
-        
-        # Create test market price
-        self.market_price = MarketMilkPrice.objects.create(
-            price=Decimal('45.00'),
-            author=self.user
+        price.refresh_from_db()
+        self.assertFalse(price.is_active)
+        self.assertTrue(new_price.is_active)
+
+    def test_dairy_information_model(self):
+        dairy = DairyInformation.objects.create(
+            author=self.user,
+            dairy_name='New Dairy',
+            dairy_address='New Address',
+            rate_type='fat_only'
         )
+        self.assertEqual(str(dairy), 'New Dairy')
+        self.assertTrue(dairy.is_active)
         
-        # Create test collection
-        self.collection = Collection.objects.create(
+        # Test single active dairy info policy
+        new_dairy = DairyInformation.objects.create(
+            author=self.user,
+            dairy_name='Another Dairy',
+            dairy_address='Another Address',
+            rate_type='fat_snf'
+        )
+        dairy.refresh_from_db()
+        self.assertFalse(dairy.is_active)
+        self.assertTrue(new_dairy.is_active)
+
+    def test_collection_model(self):
+        collection = Collection.objects.create(
+            author=self.user,
             collection_time='morning',
             milk_type='cow',
             customer=self.customer,
-            collection_date=date.today(),
+            collection_date=timezone.now().date(),
             measured='liters',
-            liters=Decimal('10.50'),
-            kg=Decimal('10.80'),
-            fat_percentage=Decimal('3.5'),
-            fat_kg=Decimal('0.38'),
-            clr=Decimal('28.5'),
-            snf_percentage=Decimal('8.5'),
-            snf_kg=Decimal('0.92'),
-            fat_rate=Decimal('45.00'),
-            snf_rate=Decimal('45.00'),
-            rate=Decimal('45.00'),
-            amount=Decimal('486.00'),
-            author=self.user
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00')
+        )
+        self.assertTrue(collection.is_active)
+        self.assertEqual(
+            str(collection),
+            f"{self.customer.name} - {collection.collection_date} morning"
         )
 
-    def test_dairy_information_str(self):
-        self.assertEqual(str(self.dairy_info), 'Test Dairy - Fat + SNF')
-
-    def test_dairy_information_soft_delete(self):
-        self.dairy_info.soft_delete()
-        self.assertFalse(DairyInformation.objects.filter(id=self.dairy_info.id).exists())
-        self.assertTrue(DairyInformation.all_objects.filter(id=self.dairy_info.id).exists())
-
-    def test_customer_str(self):
-        self.assertEqual(str(self.customer), 'Test Customer')
-
-    def test_collection_str(self):
-        expected = f"{self.customer} - {self.collection.collection_date} {self.collection.collection_time}"
-        self.assertEqual(str(self.collection), expected)
-
-    def test_rate_step_str(self):
-        self.assertEqual(str(self.rate_step), "cow - rate per kg")
-
-    def test_market_milk_price_str(self):
-        self.assertEqual(str(self.market_price), "45.00")
-
-    def test_soft_delete(self):
-        # Test soft delete for all models
+    def test_soft_deletion(self):
+        # Test soft deletion for all models
         self.customer.soft_delete()
         self.assertFalse(Customer.objects.filter(id=self.customer.id).exists())
         self.assertTrue(Customer.all_objects.filter(id=self.customer.id).exists())
-
-        self.collection.soft_delete()
-        self.assertFalse(Collection.objects.filter(id=self.collection.id).exists())
-        self.assertTrue(Collection.all_objects.filter(id=self.collection.id).exists())
-
-        self.rate_step.soft_delete()
-        self.assertFalse(RateStep.objects.filter(id=self.rate_step.id).exists())
-        self.assertTrue(RateStep.all_objects.filter(id=self.rate_step.id).exists())
-
-        self.market_price.soft_delete()
-        self.assertFalse(MarketMilkPrice.objects.filter(id=self.market_price.id).exists())
-        self.assertTrue(MarketMilkPrice.all_objects.filter(id=self.market_price.id).exists())
-
-class APITests(APITestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user = User.objects.create_user(
-            username='testuser',
-            password='testpass123',
-            phone_number='9876543210'
-        )
-        self.client.force_authenticate(user=self.user)
         
-        # Create test data
-        self.customer = Customer.objects.create(
-            name='Test Customer',
-            phone='1234567890',
-            author=self.user
-        )
+        self.market_milk_price.soft_delete()
+        self.assertFalse(MarketMilkPrice.objects.filter(id=self.market_milk_price.id).exists())
+        self.assertTrue(MarketMilkPrice.all_objects.filter(id=self.market_milk_price.id).exists())
         
-        self.rate_step = RateStep.objects.create(
-            rate_type='rate per kg',
-            milk_type='cow',
-            fat_from=Decimal('3.0'),
-            fat_to=Decimal('4.0'),
-            fat_rate=Decimal('45.00'),
-            snf_from=Decimal('8.0'),
-            snf_to=Decimal('9.0'),
-            snf_rate=Decimal('45.00'),
-            author=self.user
-        )
-        
-        self.market_price = MarketMilkPrice.objects.create(
-            price=Decimal('45.00'),
-            author=self.user
-        )
-        
-        self.collection = Collection.objects.create(
-            collection_time='morning',
-            milk_type='cow',
-            customer=self.customer,
-            collection_date=date.today(),
-            measured='liters',
-            liters=Decimal('10.50'),
-            kg=Decimal('10.80'),
-            fat_percentage=Decimal('3.5'),
-            fat_kg=Decimal('0.38'),
-            clr=Decimal('28.5'),
-            snf_percentage=Decimal('8.5'),
-            snf_kg=Decimal('0.92'),
-            fat_rate=Decimal('45.00'),
-            snf_rate=Decimal('45.00'),
-            rate=Decimal('45.00'),
-            amount=Decimal('486.00'),
-            author=self.user
-        )
+        self.dairy_information.soft_delete()
+        self.assertFalse(DairyInformation.objects.filter(id=self.dairy_information.id).exists())
+        self.assertTrue(DairyInformation.all_objects.filter(id=self.dairy_information.id).exists())
 
-        # Create test dairy information
-        self.dairy_info = DairyInformation.objects.create(
-            dairy_name='Test Dairy',
-            dairy_address='123 Test Street',
-            rate_type='fat_snf',
-            author=self.user
-        )
-
+class APITests(BaseTestCase):
     def test_customer_list(self):
         url = reverse('customer-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['results']), 1)
+        
+        # Test search
+        response = self.client.get(f"{url}?search=Test")
+        self.assertEqual(len(response.data['results']), 1)
+        response = self.client.get(f"{url}?search=NonExistent")
+        self.assertEqual(len(response.data['results']), 0)
 
     def test_customer_create(self):
         url = reverse('customer-list')
         data = {
             'name': 'New Customer',
-            'phone': '9876543210'
+            'phone': '9876543211'
         }
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Customer.objects.count(), 2)
-
-    def test_collection_list(self):
-        url = reverse('collection-list')
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 1)
-
-    def test_collection_create(self):
-        url = reverse('collection-list')
-        data = {
-            'collection_time': 'evening',
-            'milk_type': 'cow',
-            'customer': self.customer.id,
-            'collection_date': date.today().isoformat(),
-            'measured': 'liters',
-            'liters': '11.50',
-            'kg': '11.80',
-            'fat_percentage': '3.6',
-            'fat_kg': '0.38',
-            'clr': '28.6',
-            'snf_percentage': '8.6',
-            'snf_kg': '0.92',
-            'fat_rate': '45.00',
-            'snf_rate': '45.00',
-            'rate': '45.00',
-            'amount': '531.00'
-        }
+        self.assertEqual(response.data['phone'], '+919876543211')
+        
+        # Test duplicate phone
         response = self.client.post(url, data)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(Collection.objects.count(), 2)
-
-    def test_rate_step_list(self):
-        url = reverse('rate-step-list')
-        response = self.client.get(url)
-        if response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR:
-            print("Response data:", response.data)  # Debug info
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(isinstance(response.data, (dict, list)))
-        if isinstance(response.data, dict):
-            self.assertTrue('results' in response.data)
-            self.assertEqual(len(response.data['results']), 1)
-        else:
-            self.assertEqual(len(response.data), 1)
-
-    def test_rate_step_create(self):
-        url = reverse('rate-step-list')
-        data = {
-            'rate_type': 'rate per kg',
-            'milk_type': 'buffalo',
-            'fat_from': '4.0',
-            'fat_to': '5.0',
-            'fat_rate': '50.00',
-            'snf_from': '9.0',
-            'snf_to': '10.0',
-            'snf_rate': '50.00'
-        }
-        response = self.client.post(url, data)
-        if response.status_code != status.HTTP_201_CREATED:
-            print("Response data:", response.data)  # Debug info
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(RateStep.objects.count(), 2)
+        
+        # Test invalid phone
+        data['phone'] = '123'
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        
+        # Test empty name
+        data['name'] = ''
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_market_price_list(self):
+    def test_customer_update(self):
+        url = reverse('customer-detail', args=[self.customer.id])
+        data = {
+            'name': 'Updated Customer',
+            'phone': '9876543212'
+        }
+        response = self.client.put(url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['name'], 'Updated Customer')
+        self.assertEqual(response.data['phone'], '+919876543212')
+        
+        # Test partial update
+        response = self.client.patch(url, {'name': 'Partially Updated'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['name'], 'Partially Updated')
+
+    def test_market_milk_price_list(self):
         url = reverse('market-milk-price-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(Decimal(response.data['price']), Decimal('50.00'))
 
-    def test_market_price_create(self):
+    def test_market_milk_price_create(self):
         url = reverse('market-milk-price-list')
         data = {
-            'price': '46.00'
+            'price': '55.50'
         }
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(MarketMilkPrice.objects.count(), 2)
-
-    def test_collection_filters(self):
-        url = reverse('collection-list')
+        self.assertEqual(Decimal(response.data['price']), Decimal('55.50'))
         
-        # Test date filter
-        response = self.client.get(url, {
-            'date_from': date.today().isoformat(),
-            'date_to': date.today().isoformat()
-        })
-        self.assertEqual(len(response.data['results']), 1)
+        # Verify previous price is inactive
+        self.market_milk_price.refresh_from_db()
+        self.assertFalse(self.market_milk_price.is_active)
         
-        # Test milk type filter
-        response = self.client.get(url, {'milk_type': 'cow'})
-        self.assertEqual(len(response.data['results']), 1)
-        
-        # Test customer filter
-        response = self.client.get(url, {'customer': self.customer.id})
-        self.assertEqual(len(response.data['results']), 1)
-
-    def test_rate_step_filters(self):
-        url = reverse('rate-step-list')
-        
-        # Test milk type filter
-        response = self.client.get(url, {'milk_type': 'cow'})
-        if not isinstance(response.data, (dict, list)):
-            print("Response data:", response.data)  # Debug info
-        self.assertTrue(isinstance(response.data, (dict, list)))
-        if isinstance(response.data, dict):
-            self.assertTrue('results' in response.data)
-            count = len(response.data['results'])
-        else:
-            count = len(response.data)
-        self.assertEqual(count, 1)
-        
-        # Test rate range filter
-        response = self.client.get(url, {
-            'min_fat_rate': '40.00',
-            'max_fat_rate': '50.00'
-        })
-        self.assertTrue(isinstance(response.data, (dict, list)))
-        if isinstance(response.data, dict):
-            self.assertTrue('results' in response.data)
-            count = len(response.data['results'])
-        else:
-            count = len(response.data)
-        self.assertEqual(count, 1)
-
-    def test_authentication_required(self):
-        # Test without authentication
-        self.client.force_authenticate(user=None)
-        
-        urls = [
-            reverse('customer-list'),
-            reverse('collection-list'),
-            reverse('rate-step-list'),
-            reverse('market-milk-price-list')
-        ]
-        
-        for url in urls:
-            response = self.client.get(url)
-            self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_user_specific_data(self):
-        # Create another user and their data
-        other_user = User.objects.create_user(
-            username='otheruser',
-            password='otherpass123',
-            phone_number='5555555555'
-        )
-        
-        other_customer = Customer.objects.create(
-            name='Other Customer',
-            phone='5555555555',
-            author=other_user
-        )
-        
-        # Test that first user can't see other user's data
-        url = reverse('customer-list')
-        response = self.client.get(url)
-        self.assertEqual(len(response.data['results']), 1)
-        self.assertEqual(response.data['results'][0]['name'], 'Test Customer')
-
-    def test_generate_report(self):
-        # First ensure we have some collection data
-        Collection.objects.create(
-            collection_time='morning',
-            milk_type='cow',
-            customer=self.customer,
-            collection_date=date.today(),
-            measured='liters',
-            liters=Decimal('10.50'),
-            kg=Decimal('10.80'),
-            fat_percentage=Decimal('3.5'),
-            fat_kg=Decimal('0.38'),
-            clr=Decimal('28.5'),
-            snf_percentage=Decimal('8.5'),
-            snf_kg=Decimal('0.92'),
-            fat_rate=Decimal('45.00'),
-            snf_rate=Decimal('45.00'),
-            rate=Decimal('45.00'),
-            amount=Decimal('486.00'),
-            author=self.user
-        )
-
-        url = reverse('collection-generate-report')
-        params = {
-            'start_date': date.today().isoformat(),
-            'end_date': date.today().isoformat(),
-            'report_type': 'purchase_report',
-            'customer': self.customer.id,
-            'collection_time': 'morning',
-            'milk_type': 'cow'
-        }
-        response = self.client.get(url, params)
-        if response.status_code != status.HTTP_200_OK:
-            print("Response data:", response.data)  # Debug info
-            print("Request params:", params)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response['Content-Type'], 'application/pdf')
+        # Test invalid price
+        data['price'] = '-1.00'
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_dairy_information_list(self):
         url = reverse('dairy-information-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(response.data['dairy_name'], 'Test Dairy')
 
     def test_dairy_information_create(self):
         url = reverse('dairy-information-list')
         data = {
             'dairy_name': 'New Dairy',
-            'dairy_address': '456 New Street',
-            'rate_type': 'fat_snf'
+            'dairy_address': 'New Address',
+            'rate_type': 'fat_only'
         }
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(DairyInformation.objects.count(), 2)
-
-    def test_generate_customer_bill(self):
-        # Create additional test data
-        other_customer = Customer.objects.create(
-            name='Other Customer',
-            phone='9876543210',
-            author=self.user
-        )
+        self.assertEqual(response.data['dairy_name'], 'New Dairy')
         
-        Collection.objects.create(
-            collection_time='evening',
-            milk_type='cow',
-            customer=other_customer,
-            collection_date=date.today(),
-            measured='liters',
-            liters=Decimal('11.50'),
-            kg=Decimal('11.80'),
-            fat_percentage=Decimal('3.6'),
-            fat_kg=Decimal('0.38'),
-            clr=Decimal('28.6'),
-            snf_percentage=Decimal('8.6'),
-            snf_kg=Decimal('0.92'),
-            fat_rate=Decimal('45.00'),
-            snf_rate=Decimal('45.00'),
-            rate=Decimal('45.00'),
-            amount=Decimal('531.00'),
-            author=self.user
-        )
-
-        url = reverse('collection-generate-customer-bill')
-        params = {
-            'start_date': date.today().isoformat(),
-            'end_date': date.today().isoformat(),
-            'customer_ids': f"{self.customer.id},{other_customer.id}"
-        }
-        response = self.client.get(url, params)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response['Content-Type'], 'application/pdf')
-
-    def test_generate_customer_bill_invalid_customer(self):
-        url = reverse('collection-generate-customer-bill')
-        params = {
-            'start_date': date.today().isoformat(),
-            'end_date': date.today().isoformat(),
-            'customer_ids': '999999'  # Non-existent customer ID
-        }
-        response = self.client.get(url, params)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn('invalid_customer_ids', response.data)
-        self.assertEqual(response.data['invalid_customer_ids'], [999999])
-
-    def test_generate_customer_bill_missing_params(self):
-        url = reverse('collection-generate-customer-bill')
-        response = self.client.get(url)
+        # Test duplicate name - should be allowed but deactivate old dairy
+        old_dairy = DairyInformation.objects.get(dairy_name='New Dairy')
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['dairy_name'], 'New Dairy')
+        
+        # Verify old dairy is now inactive
+        old_dairy.refresh_from_db()
+        self.assertFalse(old_dairy.is_active)
+        
+        # Test invalid rate type
+        data['rate_type'] = 'invalid'
+        response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('error', response.data)
 
-    def test_generate_customer_bill_invalid_date_format(self):
-        url = reverse('collection-generate-customer-bill')
-        params = {
-            'start_date': '2024/02/20',  # Invalid format
-            'end_date': '2024/02/21',    # Invalid format
-            'customer_ids': str(self.customer.id)
-        }
-        response = self.client.get(url, params)
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('error', response.data)
-
-    def test_generate_customer_bill_no_collections(self):
-        # Use a date range with no collections
-        future_date = (date.today() + timedelta(days=30)).isoformat()
-        url = reverse('collection-generate-customer-bill')
-        params = {
-            'start_date': future_date,
-            'end_date': future_date,
-            'customer_ids': str(self.customer.id)
-        }
-        response = self.client.get(url, params)
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertIn('error', response.data)
-
-class SerializerTests(TestCase):
+class CollectionAPITests(BaseTestCase):
     def setUp(self):
-        self.factory = APIRequestFactory()
-        self.user = User.objects.create_user(
-            username='testuser',
-            password='testpass123',
-            phone_number='9876543210'
-        )
-        
-        self.customer_data = {
-            'name': 'Test Customer',
-            'phone': '1234567890'
-        }
-        
+        super().setUp()
         self.collection_data = {
             'collection_time': 'morning',
             'milk_type': 'cow',
-            'collection_date': date.today(),
+            'customer': self.customer.id,
+            'collection_date': timezone.now().date().isoformat(),
             'measured': 'liters',
-            'liters': Decimal('10.50'),
-            'kg': Decimal('10.80'),
-            'fat_percentage': Decimal('3.5'),
-            'fat_kg': Decimal('0.38'),
-            'clr': Decimal('28.5'),
-            'snf_percentage': Decimal('8.5'),
-            'snf_kg': Decimal('0.92'),
-            'fat_rate': Decimal('45.00'),
-            'snf_rate': Decimal('45.00'),
-            'rate': Decimal('45.00'),
-            'amount': Decimal('486.00')
+            'liters': '10.00',
+            'kg': '10.30',
+            'fat_percentage': '4.5',
+            'fat_kg': '0.45',
+            'clr': '27.0',
+            'snf_percentage': '9.0',
+            'snf_kg': '0.90',
+            'rate': '50.00',
+            'amount': '500.00',
+            'base_snf_percentage': '9.0'
         }
 
-        self.dairy_info_data = {
-            'dairy_name': 'Test Dairy',
-            'dairy_address': '123 Test Street',
-            'rate_type': 'fat_snf'
+    def test_collection_create(self):
+        url = reverse('collection-list')
+        self.collection_data = {
+            'collection_time': 'morning',
+            'milk_type': 'cow',
+            'customer': self.customer.id,
+            'collection_date': timezone.now().date().isoformat(),
+            'measured': 'liters',
+            'liters': '10.00',
+            'kg': '10.30',
+            'fat_percentage': '4.5',
+            'fat_kg': '0.45',
+            'clr': '27.0',
+            'snf_percentage': '9.0',
+            'snf_kg': '0.90',
+            'rate': '50.00',
+            'amount': '500.00',
+            'base_fat_percentage': '6.5',
+            'base_snf_percentage': '9.0'
         }
+        
+        response = self.client.post(url, self.collection_data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Collection.objects.count(), 1)
+        collection = Collection.objects.first()
+        self.assertEqual(collection.customer, self.customer)
+        self.assertEqual(collection.author, self.user)
+        self.assertEqual(str(collection.amount), '500.00')
+        
+        # Test custom SNF percentage
+        self.collection_data['base_snf_percentage'] = '9.5'
+        response = self.client.post(url, self.collection_data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # Test invalid SNF percentage
+        self.collection_data['base_snf_percentage'] = '9.6'
+        response = self.client.post(url, self.collection_data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_customer_serializer(self):
-        serializer = CustomerSerializer(data=self.customer_data)
-        self.assertTrue(serializer.is_valid())
-
-    def test_collection_serializer(self):
-        # Create required customer first
-        customer = Customer.objects.create(
-            name='Test Customer',
-            phone='1234567890',
-            author=self.user
+    def test_collection_list_and_filter(self):
+        # Create test collections
+        Collection.objects.create(
+            author=self.user,
+            collection_time='morning',
+            milk_type='cow',
+            customer=self.customer,
+            collection_date=timezone.now().date(),
+            measured='liters',
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00')
         )
         
-        data = self.collection_data.copy()
-        data['customer'] = customer.id
-        data['author'] = self.user.id
+        url = reverse('collection-list')
         
-        request = self.factory.post('/fake-url/')
-        request.user = self.user
+        # Test basic list
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
         
-        serializer = CollectionDetailSerializer(data=data, context={'request': request})
-        self.assertTrue(serializer.is_valid(), serializer.errors)
+        # Test date filter
+        today = timezone.now().date()
+        response = self.client.get(f"{url}?date_from={today}&date_to={today}")
+        self.assertEqual(len(response.data['results']), 1)
+        
+        # Test collection time filter
+        response = self.client.get(f"{url}?collection_time=morning")
+        self.assertEqual(len(response.data['results']), 1)
+        response = self.client.get(f"{url}?collection_time=evening")
+        self.assertEqual(len(response.data['results']), 0)
+        
+        # Test milk type filter
+        response = self.client.get(f"{url}?milk_type=cow")
+        self.assertEqual(len(response.data['results']), 1)
+        response = self.client.get(f"{url}?milk_type=buffalo")
+        self.assertEqual(len(response.data['results']), 0)
+        
+        # Test customer filter
+        response = self.client.get(f"{url}?customer={self.customer.id}")
+        self.assertEqual(len(response.data['results']), 1)
+        
+        # Test amount range filter
+        response = self.client.get(f"{url}?min_amount=400&max_amount=600")
+        self.assertEqual(len(response.data['results']), 1)
+        response = self.client.get(f"{url}?min_amount=600")
+        self.assertEqual(len(response.data['results']), 0)
+
+    def test_collection_create_insufficient_balance(self):
+        # Set wallet balance to 1.00
+        self.wallet.balance = Decimal('1.00')
+        self.wallet.save()
+
+        url = reverse('collection-list')
+        response = self.client.post(url, self.collection_data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Insufficient wallet balance', response.data['error'])
+        
+        # Test with custom SNF
+        self.wallet.balance = Decimal('3.00')
+        self.wallet.save()
+        self.collection_data['base_snf_percentage'] = '9.5'
+        response = self.client.post(url, self.collection_data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Insufficient wallet balance', response.data['error'])
+
+    def test_collection_update(self):
+        # Create a collection first
+        collection = Collection.objects.create(
+            author=self.user,
+            collection_time='morning',
+            milk_type='cow',
+            customer=self.customer,
+            collection_date=timezone.now().date(),
+            measured='liters',
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00'),
+            base_fat_percentage=Decimal('6.5'),
+            base_snf_percentage=Decimal('9.0')
+        )
+        
+        url = reverse('collection-detail', args=[collection.id])
+        update_data = self.collection_data.copy()
+        update_data['amount'] = '600.00'
+        
+        # Test full update
+        response = self.client.put(url, update_data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(response.data['amount']), Decimal('600.00'))
+        
+        # Test partial update
+        response = self.client.patch(url, {'amount': '700.00'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(response.data['amount']), Decimal('700.00'))
+
+    def test_generate_report(self):
+        # Create test collections
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        Collection.objects.create(
+            author=self.user,
+            collection_time='morning',
+            milk_type='cow',
+            customer=self.customer,
+            collection_date=today,
+            measured='liters',
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00')
+        )
+        
+        Collection.objects.create(
+            author=self.user,
+            collection_time='evening',
+            milk_type='buffalo',
+            customer=self.customer,
+            collection_date=yesterday,
+            measured='liters',
+            liters=Decimal('15.00'),
+            kg=Decimal('15.45'),
+            fat_percentage=Decimal('6.0'),
+            fat_kg=Decimal('0.90'),
+            clr=Decimal('28.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('1.35'),
+            rate=Decimal('60.00'),
+            amount=Decimal('900.00')
+        )
+        
+        url = reverse('collection-generate-report')
+        
+        # Test missing parameters
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error'], 'start_date and end_date are required query parameters')
+        
+        # Test invalid date format
+        response = self.client.get(
+            f"{url}?start_date=invalid&end_date=invalid"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error'], 'Invalid date format. Use YYYY-MM-DD')
+        
+        # Test no collections in date range
+        future_date = today + timedelta(days=10)
+        response = self.client.get(
+            f"{url}?start_date={future_date}&end_date={future_date}"
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data['error'], 'No collections found for the specified date range')
+        
+        # Test successful report generation
+        response = self.client.get(
+            f"{url}?start_date={yesterday}&end_date={today}"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn('attachment; filename="milk_report_', response['Content-Disposition'])
+
+    def test_generate_customer_report(self):
+        # Create test collections
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        Collection.objects.create(
+            author=self.user,
+            collection_time='morning',
+            milk_type='cow',
+            customer=self.customer,
+            collection_date=today,
+            measured='liters',
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00')
+        )
+        
+        url = reverse('collection-generate-customer-report')
+        
+        # Test valid request
+        response = self.client.get(
+            f"{url}?start_date={yesterday}&end_date={today}&customer_ids={self.customer.id}"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        
+        # Test invalid customer ID
+        response = self.client.get(
+            f"{url}?start_date={yesterday}&end_date={today}&customer_ids=999"
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+        # Test missing parameters
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class SerializerTests(BaseTestCase):
+    def setUp(self):
+        super().setUp()
+        # Create a mock request with user
+        self.request = type('Request', (), {'user': self.user})
+        self.serializer_context = {'request': self.request}
+
+    def test_customer_serializer(self):
+        data = {
+            'name': 'Test Customer',
+            'phone': '9876543210'
+        }
+        serializer = CustomerSerializer(data=data, context=self.serializer_context)
+        self.assertTrue(serializer.is_valid())
+        customer = serializer.save()
+        self.assertEqual(customer.phone, '+919876543210')
+
+    def test_customer_serializer_validation(self):
+        # Test invalid phone number
+        data = {
+            'name': 'Test Customer',
+            'phone': '123'
+        }
+        serializer = CustomerSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('phone', serializer.errors)
+        
+        # Test empty name
+        data = {
+            'name': '',
+            'phone': '9876543210'
+        }
+        serializer = CustomerSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('name', serializer.errors)
+
+    def test_collection_serializers(self):
+        collection = Collection.objects.create(
+            author=self.user,
+            collection_time='morning',
+            milk_type='cow',
+            customer=self.customer,
+            collection_date=timezone.now().date(),
+            measured='liters',
+            liters=Decimal('10.00'),
+            kg=Decimal('10.30'),
+            fat_percentage=Decimal('4.5'),
+            fat_kg=Decimal('0.45'),
+            clr=Decimal('27.0'),
+            snf_percentage=Decimal('9.0'),
+            snf_kg=Decimal('0.90'),
+            rate=Decimal('50.00'),
+            amount=Decimal('500.00')
+        )
+        
+        # Test list serializer
+        list_serializer = CollectionListSerializer(collection, context=self.serializer_context)
+        self.assertEqual(list_serializer.data['customer_name'], 'Test Customer')
+        
+        # Test detail serializer
+        detail_serializer = CollectionDetailSerializer(collection, context=self.serializer_context)
+        self.assertEqual(detail_serializer.data['customer'], self.customer.id)
+        self.assertEqual(detail_serializer.data['customer_name'], 'Test Customer')
+
+    def test_collection_serializer_validation(self):
+        data = {
+            'collection_time': 'invalid',
+            'milk_type': 'cow',
+            'customer': self.customer.id,
+            'collection_date': timezone.now().date(),
+            'measured': 'liters',
+            'liters': '10.00',
+            'kg': '10.30',
+            'fat_percentage': '4.5',
+            'fat_kg': '0.45',
+            'clr': '27.0',
+            'snf_percentage': '9.0',
+            'snf_kg': '0.90',
+            'rate': '50.00',
+            'amount': '500.00'
+        }
+        serializer = CollectionDetailSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('collection_time', serializer.errors)
+        
+        # Test invalid numeric values
+        data['collection_time'] = 'morning'
+        data['liters'] = '-1'
+        serializer = CollectionDetailSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('liters', serializer.errors)
+        
+        # Test invalid percentage
+        data['liters'] = '10.00'
+        data['fat_percentage'] = '101'
+        serializer = CollectionDetailSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('fat_percentage', serializer.errors)
+
+    def test_market_price_serializer(self):
+        data = {
+            'price': '55.50'
+        }
+        serializer = MarketMilkPriceSerializer(data=data, context=self.serializer_context)
+        self.assertTrue(serializer.is_valid())
+        price = serializer.save()
+        self.assertEqual(price.price, Decimal('55.50'))
+
+    def test_market_price_serializer_validation(self):
+        # Test negative price
+        data = {
+            'price': '-1.00'
+        }
+        serializer = MarketMilkPriceSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('price', serializer.errors)
+        
+        # Test zero price
+        data['price'] = '0.00'
+        serializer = MarketMilkPriceSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('price', serializer.errors)
 
     def test_dairy_information_serializer(self):
-        serializer = DairyInformationSerializer(data=self.dairy_info_data)
+        data = {
+            'dairy_name': 'New Test Dairy',  # Changed to avoid duplicate name
+            'dairy_address': 'Test Address',
+            'rate_type': 'fat_only'
+        }
+        serializer = DairyInformationSerializer(data=data, context=self.serializer_context)
         self.assertTrue(serializer.is_valid())
+        dairy = serializer.save()
+        self.assertEqual(dairy.dairy_name, 'New Test Dairy')
+
+    def test_dairy_information_serializer_validation(self):
+        # Test invalid rate type
+        data = {
+            'dairy_name': 'Test Dairy',
+            'dairy_address': 'Test Address',
+            'rate_type': 'invalid'
+        }
+        serializer = DairyInformationSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('rate_type', serializer.errors)
+        
+        # Test empty dairy name
+        data = {
+            'dairy_name': '',
+            'dairy_address': 'Test Address',
+            'rate_type': 'fat_only'
+        }
+        serializer = DairyInformationSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('dairy_name', serializer.errors)
+        
+        # Test duplicate dairy name
+        data = {
+            'dairy_name': 'Test Dairy',
+            'dairy_address': 'Another Address',
+            'rate_type': 'fat_only'
+        }
+        serializer = DairyInformationSerializer(data=data, context=self.serializer_context)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('dairy_name', serializer.errors)
